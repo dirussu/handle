@@ -59,6 +59,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
         setupHotkey()
         setupAccessibilityPriming()
+        startScheduler()     // fire due saved automations
         #if DEBUG
         startTestHarness()   // file-watch trigger for the autonomous build/test loop
         #endif
@@ -571,6 +572,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             return
         }
 
+        // 2a-0. SCHEDULE — if the goal is a recurring request ("every day at 8am…"),
+        // save it as a scheduled automation (approved once) instead of running now.
+        if hasScheduleHint(userText), await saveScheduledAutomationIfRequested(goal: userText, in: conversation) { return }
+
         // 2a. RECIPE path — if a recipe matches the goal, run the RELIABLE
         // retrieve→fill→AppleScript path (the 7B does app-control badly freeform; a
         // recipe fixes that). Keyword-gated, so non-recipe turns skip it with no cost.
@@ -860,6 +865,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 else if cmd == "__axtree__" { self?.runAXTreeDump() }
                 else if cmd.hasPrefix("__plan__ ") { await self?.runPlanProbe(goal: String(cmd.dropFirst(9))) }
                 else if cmd.hasPrefix("__recipe__ ") { await self?.runRecipeProbe(goal: String(cmd.dropFirst(11))) }
+                else if cmd == "__schedtest__" { self?.runSchedTest() }
                 else { await self?.runPointingHarness(query: cmd) }
             }
         }
@@ -1001,6 +1007,109 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         return true
     }
 
+    // MARK: - Automations (save + schedule)
+
+    /// True if the goal reads like a RECURRING schedule request ("every day at 8am…").
+    private func hasScheduleHint(_ goal: String) -> Bool {
+        let t = goal.lowercased()
+        return ["every ", "each ", "daily", "weekday", "weekly"].contains { t.contains($0) }
+    }
+
+    /// Ask the 7B to split a schedule request into a time trigger + the task to do
+    /// (NL→structured, its strength). Returns nil if it's not actually a schedule.
+    private func parseSchedule(_ goal: String) async -> (schedule: AutomationSchedule, task: String)? {
+        let reply = await askModel("""
+        The user said: "\(goal)"
+
+        If this asks to SCHEDULE a recurring task, reply with ONLY this JSON:
+        {"hour": <0-23>, "minute": <0-59>, "days": <[1-7] or null>, "task": "<the action, with scheduling words removed>"}
+        (days: 1=Sunday … 7=Saturday; null = every day. "8am"→8, "6pm"→18, "morning"→8, "evening"→18.)
+        If it is NOT a recurring/scheduled request, reply with ONLY: none
+        """)
+        for json in jsonObjectCandidates(in: reply) {
+            guard let d = json.data(using: .utf8), let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+                  let task = (o["task"] as? String), !task.isEmpty else { continue }
+            let days = (o["days"] as? [Any])?.compactMap { Self.intArg($0) }
+            let sched = AutomationSchedule(hour: max(0, min(23, Self.intArg(o["hour"]) ?? 8)),
+                                           minute: max(0, min(59, Self.intArg(o["minute"]) ?? 0)),
+                                           days: (days?.isEmpty ?? true) ? nil : days)
+            return (sched, task)
+        }
+        return nil
+    }
+
+    /// SAVE-AND-SCHEDULE flow: parse the schedule, match+fill a recipe for the task,
+    /// confirm ONCE (standing consent), and persist. Returns true if it handled the turn.
+    private func saveScheduledAutomationIfRequested(goal: String, in conversation: Conversation) async -> Bool {
+        guard let (schedule, task) = await parseSchedule(goal) else { return false }
+        guard let recipe = await matchRecipe(goal: task) else {
+            conversation.commitAssistantMessage("I can schedule things, but I don't have a recipe for “\(task)” yet."); return true
+        }
+        let params = await fillParams(recipe: recipe, goal: task)
+        let paramsJSON = (try? JSONSerialization.data(withJSONObject: params)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+        let approved = await awaitConfirmation(in: conversation, title: "Save automation?",
+            rows: [("When", schedule.describe),
+                   ("Does", recipe.resolve(recipe.confirmTemplate, with: params)),
+                   ("Script", recipe.resolve(recipe.body, with: params))],
+            label: "save-automation")
+        if Task.isCancelled { return true }
+        guard approved else { conversation.commitAssistantMessage("Okay, I didn't save it."); return true }
+        AutomationStore.shared.add(Automation(id: UUID().uuidString, name: recipe.title, recipeId: recipe.id,
+                                              paramsJSON: paramsJSON, schedule: schedule))
+        conversation.addToolChip(name: "run_applescript", inputJSON: "{}",
+                                 content: "Scheduled \(schedule.describe)", isError: false, displaySummary: "Automation saved")
+        conversation.commitAssistantMessage("Saved — I'll \(recipe.title.lowercased()) \(schedule.describe).")
+        return true
+    }
+
+    /// Run a saved automation WITHOUT a card (standing consent granted at save time).
+    private func runAutomation(_ a: Automation) async {
+        guard let recipe = RecipeStore.shared.recipes.first(where: { $0.id == a.recipeId }) else {
+            agentLog.error("automation \(a.name, privacy: .public): recipe \(a.recipeId, privacy: .public) missing"); return
+        }
+        let params = a.paramsJSON.data(using: .utf8).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
+        do {
+            _ = try AppleScriptTool.shared.runScript(recipe.resolve(recipe.body, with: params))
+            agentLog.info("automation \(a.name, privacy: .public): ran OK")
+            await AuditLog.shared.record(tool: "automation:\(a.name)", argsJSON: a.paramsJSON, outcome: "ok", summary: recipe.title, confirmed: true)
+        } catch {
+            await AuditLog.shared.record(tool: "automation:\(a.name)", argsJSON: a.paramsJSON, outcome: "error", summary: error.localizedDescription, confirmed: true)
+        }
+    }
+
+    /// Once-a-tick scheduler: run any enabled automation whose time is due (deduped per
+    /// minute via `lastRunKey`). Started on launch.
+    private func startScheduler() {
+        Timer.scheduledTimer(withTimeInterval: 20, repeats: true) { [weak self] _ in
+            Task { @MainActor in await self?.tickScheduler() }
+        }
+        agentLog.info("scheduler: started (\(AutomationStore.shared.automations.count) automation(s))")
+    }
+
+    private func tickScheduler() async {
+        let now = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute, .weekday], from: Date())
+        guard let y = now.year, let mo = now.month, let d = now.day, let h = now.hour, let mi = now.minute else { return }
+        let key = String(format: "%04d-%02d-%02d-%02d-%02d", y, mo, d, h, mi)
+        for a in AutomationStore.shared.automations where a.enabled && a.lastRunKey != key {
+            guard let s = a.schedule, s.isDue(now) else { continue }
+            var updated = a; updated.lastRunKey = key
+            AutomationStore.shared.replace(updated)
+            agentLog.info("scheduler: firing \"\(a.name, privacy: .public)\" (\(s.describe, privacy: .public))")
+            await runAutomation(a)
+            if !NotchController.shared.isPanelOpen { NotificationsService.shared.notifyTaskComplete(body: "Ran automation: \(a.name)") }
+        }
+    }
+
+    /// SCHEDULER TEST (`__schedtest__`): save a "set volume to 12" automation firing ~70s
+    /// out (no card) and let the live scheduler pick it up — validates the tick loop.
+    private func runSchedTest() {
+        let c = Calendar.current.dateComponents([.hour, .minute], from: Date().addingTimeInterval(70))
+        AutomationStore.shared.add(Automation(id: "schedtest", name: "sched test", recipeId: "set-volume",
+                                              paramsJSON: "{\"level\": 12}",
+                                              schedule: AutomationSchedule(hour: c.hour ?? 0, minute: c.minute ?? 0, days: nil)))
+        agentLog.info("schedtest: saved automation firing at \(c.hour ?? 0):\(c.minute ?? 0) — watch for the scheduler")
+    }
+
     /// Run the full pointing pipeline against the frontmost app for `query`, no GUI
     /// needed — capture, enumerate AX, See turn with the pointing instruction; the
     /// dispatch logs the selected element + live frame (and draws the highlight).
@@ -1110,6 +1219,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         let parsedRecipe = RecipeFile.parse(sampleMd)
         check("recipe .md parse id+param", parsedRecipe?.id == "test-x" && parsedRecipe?.params.first?.name == "n")
         check("recipe .md parse body", parsedRecipe?.body == "set x to ${n}")
+        // Automation schedule logic.
+        check("schedule isDue match", AutomationSchedule(hour: 9, minute: 30, days: nil).isDue(DateComponents(hour: 9, minute: 30)))
+        check("schedule isDue miss", !AutomationSchedule(hour: 9, minute: 30, days: nil).isDue(DateComponents(hour: 9, minute: 31)))
+        check("schedule describe pm", AutomationSchedule(hour: 18, minute: 0, days: nil).describe == "every day at 6:00 PM")
         // Agent-loop routing + result formatting
         check("asksToAct again", promptAsksToAct("look again at the screen"))
         check("asksToAct open", promptAsksToAct("open my downloads"))

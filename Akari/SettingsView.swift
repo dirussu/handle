@@ -30,10 +30,67 @@ struct SettingsBody: View {
             }
 
             WorkspaceSection()
+            AutomationsSection()
             ActivitySection()
             PowerUserSection()
         }
         .formStyle(.grouped)
+    }
+}
+
+/// Manage saved automations — the visible, controllable side of the scheduler.
+/// Each row: name, its schedule, an enable/disable switch, and delete.
+private struct AutomationsSection: View {
+    @State private var automations: [Automation] = AutomationStore.shared.automations
+
+    var body: some View {
+        Section {
+            if automations.isEmpty {
+                Text("No saved automations yet. Ask Akari to schedule one — e.g. \"set my volume to 20 every day at 6pm\".")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else {
+                ForEach(automations) { a in
+                    HStack(spacing: 8) {
+                        Image(systemName: "clock.arrow.circlepath")
+                            .font(.system(size: 12)).foregroundStyle(.secondary).frame(width: 16)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(a.name).font(.body)
+                            Text(a.schedule?.describe ?? "manual only").font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Toggle("", isOn: enabledBinding(a)).labelsHidden().controlSize(.mini)
+                        Button { delete(a) } label: {
+                            Image(systemName: "trash").font(.system(size: 12)).foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                }
+            }
+        } header: {
+            Text("Automations")
+        } footer: {
+            Text("Scheduled automations run on their own — approved once when you saved them, and recorded in Activity each time they fire. Toggle off to pause, or delete.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        .onAppear { automations = AutomationStore.shared.automations }
+    }
+
+    private func enabledBinding(_ a: Automation) -> Binding<Bool> {
+        Binding(
+            get: { AutomationStore.shared.automations.first { $0.id == a.id }?.enabled ?? false },
+            set: { on in
+                if var u = AutomationStore.shared.automations.first(where: { $0.id == a.id }) {
+                    u.enabled = on
+                    AutomationStore.shared.replace(u)
+                    automations = AutomationStore.shared.automations
+                }
+            }
+        )
+    }
+
+    private func delete(_ a: Automation) {
+        AutomationStore.shared.remove(id: a.id)
+        automations = AutomationStore.shared.automations
     }
 }
 
