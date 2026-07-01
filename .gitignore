@@ -1,0 +1,23 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Xcode — user state & build output
+*.xcuserstate
+*.xcscmblueprint
+xcuserdata/
+DerivedData/
+build/
+
+# Swift Package Manager build output & resolved caches
+.build/
+.swiftpm/
+
+# LocalAITest build artifacts (Xcode build dir + mlx-swift compiled objects — 2.8 GB)
+xcbuild/
+LocalAITest/.build/
+LocalAITest/xcbuild/
+
+# Misc
+*.log

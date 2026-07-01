@@ -1,0 +1,510 @@
+import AppKit
+import SwiftUI
+
+/// One stop in a guided walkthrough: a screen-space rect to outline + its message.
+/// (Screen points, top-left origin — already mapped from the capture's pixels by
+/// the time it reaches the pointer.)
+struct GuideStep {
+    let rect: CGRect
+    let message: String
+}
+
+/// Akari's pointer — a black circle that is BORN out of the notch with a gooey
+/// metaball "spit-out": a bump forms on the panel's bottom edge, stretches down
+/// into a circle, the neck thins and snaps, and the circle settles just below.
+/// Built on the blur + alpha-threshold metaball trick.
+///
+/// Full-screen, click-through overlay. (Flying it to a target to actually point
+/// at things is the next phase; this nails the birth.)
+@MainActor
+final class MetaballPointer {
+    static let shared = MetaballPointer()
+    private var panel: NSPanel?
+    private var hideTask: Task<Void, Never>?
+    private init() {}
+
+    /// Drive a guided walkthrough: the pointer is born from the notch, its glowing
+    /// outline morphs through each step's rect (showing the message), then it
+    /// retracts back into the notch. `steps` are in screen points (top-left) on
+    /// `screen` — already mapped from capture pixels by the caller.
+    func guide(steps: [GuideStep], on screen: NSScreen) {
+        present(steps: steps, on: screen)
+    }
+
+    private func present(steps: [GuideStep], on screen: NSScreen) {
+        clear()
+
+        let panel = ClickThroughPanel(
+            contentRect: screen.frame,
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false,
+            screen: screen
+        )
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = false
+        // Sit JUST BELOW the notch window (which is mainMenu+3) so the pill/panel
+        // OCCLUDES the hidden reservoir and the droplet's in-surface start — only
+        // the part that clears the bottom edge shows, oozing out from under the
+        // surface. The notch window is transparent below the pill/panel, so the
+        // droplet shows through there; still above app windows, so it reads over
+        // whatever content is behind.
+        panel.level = NSWindow.Level(rawValue: NSWindow.Level.mainMenu.rawValue + 2)
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
+        panel.ignoresMouseEvents = true
+        panel.isReleasedWhenClosed = false
+
+        // Anchor at the surface's CURRENT bottom edge (the open panel's bottom
+        // if open, the closed-notch bottom otherwise), bottom-center.
+        let anchor = CGPoint(x: screen.frame.width / 2,
+                             y: NotchController.shared.panelBottomY(on: screen))
+
+        let view = MetaballPointerView(
+            anchor: anchor,
+            steps: steps,
+            screenSize: screen.frame.size,
+            onFinished: { [weak self] in self?.fadeOut() }   // the tour retracted into the notch — dismiss
+        )
+        let host = NSHostingView(rootView: view)
+        host.frame = NSRect(origin: .zero, size: screen.frame.size)
+        panel.contentView = host
+        panel.orderFrontRegardless()
+        self.panel = panel
+
+        hideTask = Task { @MainActor [weak self] in
+            // SAFETY fallback only — the walkthrough now dismisses itself when it
+            // retracts into the notch (`onFinished`). This just guarantees the
+            // overlay never gets stuck if that Task dies mid-tour.
+            try? await Task.sleep(for: .seconds(22))
+            guard !Task.isCancelled else { return }
+            self?.fadeOut()
+        }
+    }
+
+    /// TEMP — demo trigger (⌘⌥P) so the spit-out can be felt without the model.
+    /// Prefer the open panel's screen so it spits from the open panel's bottom
+    /// edge (even if the cursor is elsewhere); otherwise use the cursor's screen.
+    func demo() {
+        let screen = NotchController.shared.openPanelScreen() ?? PointingOverlay.currentScreen()
+        let cx = screen.frame.width / 2, h = screen.frame.height
+        present(steps: [
+            GuideStep(rect: CGRect(x: cx - 220, y: 150, width: 200, height: 54),
+                      message: "This is the command bar — type here to do anything."),
+            GuideStep(rect: CGRect(x: cx - 235, y: 300, width: 150, height: 230),
+                      message: "Your navigation lives down the side."),
+            GuideStep(rect: CGRect(x: cx - 220, y: h - 280, width: 440, height: 250),
+                      message: "And this is the main canvas — note the bubble flips above here."),
+        ], on: screen)
+    }
+
+    private func clear() {
+        hideTask?.cancel()
+        hideTask = nil
+        panel?.orderOut(nil)
+        panel = nil
+    }
+
+    private func fadeOut() {
+        guard let panel else { return }
+        NSAnimationContext.runAnimationGroup({ ctx in
+            ctx.duration = 0.3
+            panel.animator().alphaValue = 0
+        }, completionHandler: { [weak self] in
+            self?.clear()
+        })
+    }
+}
+
+// MARK: - The metaball view
+
+/// A highlight target — the unified primitive. A circle, a pill, a card are all
+/// just a rounded rectangle with a center, size, and corner radius. "Morphing"
+/// between shapes is animating these three; a guided walkthrough is a sequence.
+private struct Target: Equatable {
+    var center: CGPoint
+    var size: CGSize
+    var cornerRadius: CGFloat
+    var message: String
+}
+
+/// Measures the message bubble's size so it can be auto-placed — and kept fully
+/// on-screen — relative to the highlighted shape.
+private struct BubbleSizeKey: PreferenceKey {
+    static let defaultValue: CGSize = .zero
+    static func reduce(value: inout CGSize, nextValue: () -> CGSize) {
+        let n = nextValue()
+        if n.width > 0 { value = n }
+    }
+}
+
+private struct MetaballPointerView: View {
+    let anchor: CGPoint       // notch/panel bottom-center (the spit origin)
+    let steps: [GuideStep]    // the walkthrough stops — screen-space rects + messages
+    let screenSize: CGSize       // the full overlay size — keeps the bubble on-screen
+    let onFinished: () -> Void   // called when the tour finishes (retracted into the notch)
+
+    @State private var start: Date?
+    // Walkthrough (state-driven; takes over once the birth settles). The glow
+    // outline morphs through `steps`, a message bubble popping in at each stop.
+    @State private var walkthrough = false
+    @State private var target = Target(center: .zero, size: .zero, cornerRadius: 0, message: "")
+    @State private var bubbleShown = false
+    @State private var bubbleText = ""          // changed INSTANTLY while hidden — never animated, so the
+                                                // text never reflows separately from its background
+    @State private var bubbleSize: CGSize = CGSize(width: 200, height: 44)
+    // Ending: the glow fades out (state-driven) while the reverse metaball "suck"
+    // plays (time-driven from suckStart) — the whole birth run backwards.
+    @State private var glowOpacity: Double = 1
+    @State private var sucking = false
+    @State private var suckStart: Date?
+
+    // Gooeyness. Blur must stay well under the blob radius (~0.7×) or the
+    // threshold erases the small droplet.
+    private let blur: CGFloat = 8         // gooey smoothing ONLY. Keep ≤ ~0.5× fullR so the circle
+                                          // stays ROUND. The long neck is drawn explicitly (below),
+                                          // not conjured from blur reach — so blur can stay low.
+    private let fullR: CGFloat = 16       // pointer radius once formed — small, clean
+    // The source the neck pulls from — hidden inside the notch's center.
+    private let sourceWidth: CGFloat = 50
+    private let sourceHeight: CGFloat = 52 // tall enough to fully hide the droplet at the start
+    private let sourceLift: CGFloat = 15  // hold the source ENTIRELY inside the notch (blur never
+                                          // reaches the bottom edge → the notch stays untouched at rest)
+    private let startInset: CGFloat = 42  // droplet starts this far UP inside the source (hidden)
+    private let restDist: CGFloat = 46    // pulls FAR down before snapping — the "escape" reaches
+    // The NECK is drawn explicitly so the notch keeps gripping the droplet across
+    // the WHOLE descent (the "trying to escape" pull), then the thread snaps at
+    // the last moment. It tapers from a fat grip at the lip to a thread at the drop.
+    private let neckSnap: CGFloat = 40    // gap (lip→droplet-top) at which the thread breaks — holds
+                                          // almost the whole pull, snapping just before the droplet
+                                          // springs past rest (so the neck never flickers back).
+    private let neckTopW: (CGFloat, CGFloat) = (34, 5)   // width at the notch lip: fat grip → wisp
+    private let neckBotW: (CGFloat, CGFloat) = (24, 2)   // width at the droplet:  fat grip → fine thread
+    private let neckPinch: CGFloat = 0.55 // concave waist (0 = straight sides, 1 = pinched to a point)
+    // Grip → release with INERTIA. A decelerating creep grips and holds (neck
+    // fat, tension building), then an underdamped spring carries the freed droplet
+    // PAST rest and rings it down — the kinetic reaction that makes the snap feel
+    // physical instead of stopping dead. The spring leaves the hold at zero
+    // velocity, so there's no mechanical jolt; the overshoot is the released tension.
+    private let gripDur: Double = 0.80          // creep + hold time before the thread lets go
+    private let gripTo: Double = 0.78           // how far it has crept (of the full travel) at release
+    private let springZeta: Double = 0.42       // damping: lower = bigger overshoot / more bounces
+    private let springOmega: Double = 14.0      // stiffness: higher = quicker, snappier reaction
+    // Once it settles, the solid black droplet crossfades into a TRANSPARENT circle
+    // with a uniformly glowing white border (the comet's glow, but spread evenly
+    // around the ring — no rotation) — the pointer's "live" resting state.
+    private let ringWidth: CGFloat = 2.5
+    private let ringFade: Double = 0.45         // black fill drains as the ring simply fades in (no pop)
+    private var ringStart: Double { gripDur + 0.9 }  // begins once the spring has settled
+    private let walkthroughStart: Double = 0.7  // seconds after the ring settles before the tour begins
+    // The bubble's entrance: a slow, no-bounce spring so it drifts up + fades in
+    // smoothly (high-end), rather than snapping.
+    private let bubbleIn = Animation.spring(response: 0.55, dampingFraction: 0.9)
+    // One house corner radius for every highlight outline — clamped per shape so
+    // squares round to circles and thin bars round fully. (Consistent, not
+    // per-element: the chosen approach.)
+    private func houseRadius(_ s: CGSize) -> CGFloat { min(fullR, min(s.width, s.height) / 2) }
+    var body: some View {
+        ZStack {
+            // Birth — the time-sampled metaball droplet + shockwave + pop-in ring.
+            // The ring hands off to the walkthrough once it has settled.
+            TimelineView(.animation) { timeline in
+                let t = start.map { timeline.date.timeIntervalSince($0) } ?? 0
+                let s = sample(t)
+                let ring = clamp((t - ringStart) / ringFade)
+                let metaball = 1 - clamp((t - ringStart) / 0.22)   // black drains as the ring fades in
+                ZStack {
+                    if metaball > 0.001 {
+                        metaballCanvas(pos: s.pos, r: s.r).opacity(metaball)
+                    }
+                    // The birth ring — a SIMPLE crossfade (black drains, ring fades
+                    // in; no pop, no bounce). Shown only until the walkthrough takes
+                    // over from the exact same circle, so the swap is invisible.
+                    if !walkthrough && ring > 0.001 {
+                        glowShape(size: CGSize(width: fullR * 2, height: fullR * 2), cornerRadius: fullR)
+                            .position(x: anchor.x, y: anchor.y + restDist)
+                            .opacity(ring)
+                    }
+
+                    // Ending — the reverse metaball: the droplet rises back up and
+                    // is sucked into the notch. The neck re-forms on its own as it
+                    // nears the source (same machinery as the birth, run upward).
+                    if sucking, let ss = suckStart {
+                        let ts = timeline.date.timeIntervalSince(ss)
+                        if ts >= 0 {
+                            let sk = suckSample(ts)
+                            metaballCanvas(pos: sk.pos, r: fullR).opacity(sk.opacity)
+                        }
+                    }
+                }
+            }
+
+            // Walkthrough — the same glow outline, now morphing through scripted
+            // targets with a message bubble at each stop. State-driven (springs).
+            if walkthrough {
+                let place = bubblePlacement(for: target)
+                ZStack {
+                    glowShape(size: target.size, cornerRadius: target.cornerRadius)
+                        .position(target.center)
+                        .opacity(glowOpacity)   // fades out as the reverse suck takes over
+
+                    if !bubbleText.isEmpty {
+                        messageBubble(bubbleText)
+                            .compositingGroup()   // flatten text + background → they move/fade as ONE layer
+                            .background(GeometryReader { g in
+                                Color.clear.preference(key: BubbleSizeKey.self, value: g.size)
+                            })
+                            .position(place.center)
+                            .offset(y: bubbleShown ? 0 : (place.below ? 16 : -16))   // drifts in from the far side
+                            .opacity(bubbleShown ? 1 : 0)
+                    }
+                }
+                .onPreferenceChange(BubbleSizeKey.self) { bubbleSize = $0 }
+            }
+        }
+        .ignoresSafeArea()
+        .onAppear {
+            start = Date()
+            runWalkthrough()
+        }
+    }
+
+    /// The liquid metaball — source bar + stretching neck + droplet, fused by the
+    /// blur + alpha-threshold trick. Drawn through the spit-out + settle, then
+    /// removed from the tree once it has drained into the ring.
+    private func metaballCanvas(pos: CGPoint, r: CGFloat) -> some View {
+        Canvas { ctx, _ in
+            ctx.addFilter(.alphaThreshold(min: 0.5, color: .black))
+            ctx.addFilter(.blur(radius: blur))
+            ctx.drawLayer { c in
+                let source = CGRect(x: anchor.x - sourceWidth / 2, y: anchor.y - sourceLift - sourceHeight,
+                                    width: sourceWidth, height: sourceHeight)
+                c.fill(Path(roundedRect: source, cornerRadius: 18), with: .color(.black))
+
+                // The stretching neck: appears once the droplet clears the notch
+                // lip, grips across the whole descent, then pinches off at the last
+                // moment (pow > 1 keeps it fat, then necks down fast).
+                let lip = anchor.y - sourceLift
+                let dropTop = pos.y - r
+                let gap = dropTop - lip
+                if gap > 0 && gap < neckSnap {
+                    let pinch = pow(clamp(Double(gap / neckSnap)), 1.6)
+                    c.fill(neckPath(cx: anchor.x, top: lip - 3, bottom: dropTop + 6,
+                                    wTop: lerp(neckTopW.0, neckTopW.1, pinch),
+                                    wBot: lerp(neckBotW.0, neckBotW.1, pinch)),
+                           with: .color(.black))
+                }
+
+                if r > 0.5 {
+                    c.fill(Path(ellipseIn: CGRect(x: pos.x - r, y: pos.y - r, width: r * 2, height: r * 2)),
+                           with: .color(.black))
+                }
+            }
+        }
+    }
+
+    /// The glow outline — the unified shape, generalized from the ring to ANY
+    /// rounded rectangle (a circle is just `cornerRadius = side/2`). Soft + tight
+    /// white strokes, blurred, but masked so the glow blooms only OUTWARD — the
+    /// inner area stays transparent so it never veils what it's highlighting.
+    private func glowShape(size: CGSize, cornerRadius: CGFloat) -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .circular)
+        return ZStack {
+            ZStack {
+                shape.stroke(Color.white, lineWidth: ringWidth + 2)
+                    .frame(width: size.width, height: size.height).blur(radius: 8)
+                shape.stroke(Color.white, lineWidth: ringWidth)
+                    .frame(width: size.width, height: size.height).blur(radius: 3)
+            }
+            .mask(outwardOnly(size: size, cornerRadius: cornerRadius))
+
+            shape.stroke(Color.white, lineWidth: ringWidth)
+                .frame(width: size.width, height: size.height)
+        }
+        .frame(width: size.width, height: size.height)
+    }
+
+    /// Keeps everything EXCEPT a clean inner shape — so the glow blooms only
+    /// outward and never veils the highlighted area. The hole is the outline's
+    /// inner edge (the shape inset by half the stroke).
+    private func outwardOnly(size: CGSize, cornerRadius: CGFloat) -> some View {
+        Rectangle()
+            .frame(width: size.width + 90, height: size.height + 90)   // keep the whole outward bloom
+            .overlay {
+                RoundedRectangle(cornerRadius: max(0, cornerRadius - ringWidth / 2), style: .circular)
+                    .frame(width: size.width - ringWidth, height: size.height - ringWidth)
+                    .blendMode(.destinationOut)
+            }
+            .compositingGroup()
+    }
+
+    /// The black message bubble that sits just below the highlighted shape.
+    private func messageBubble(_ text: String) -> some View {
+        Text(text)
+            .font(.system(.callout, design: .rounded).weight(.medium))
+            .foregroundStyle(.white)
+            .multilineTextAlignment(.leading)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: 260, alignment: .leading)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .background(Color.black, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .shadow(color: .black.opacity(0.35), radius: 14, y: 5)
+    }
+
+    /// The bubble hangs off a CORNER of the highlighted shape (extending outward),
+    /// not centered below it. Prefers the bottom-right corner, then falls back
+    /// through the other three so it always stays fully on-screen. `below` (does it
+    /// sit beneath the shape) drives which way it drifts in.
+    private func bubblePlacement(for shape: Target) -> (center: CGPoint, below: Bool) {
+        let margin: CGFloat = 16, gap: CGFloat = 4   // small — the bubble tucks up against the corner
+        let bw = bubbleSize.width, bh = bubbleSize.height
+        let left = shape.center.x - shape.size.width / 2
+        let right = shape.center.x + shape.size.width / 2
+        let top = shape.center.y - shape.size.height / 2
+        let bottom = shape.center.y + shape.size.height / 2
+        // Bubble top-left origin for each corner, in preference order.
+        let corners: [(x: CGFloat, y: CGFloat, below: Bool)] = [
+            (right + gap, bottom + gap, true),         // bottom-right: extend right + down
+            (left - gap - bw, bottom + gap, true),     // bottom-left:  extend left + down
+            (right + gap, top - gap - bh, false),      // top-right:    extend right + up
+            (left - gap - bw, top - gap - bh, false),  // top-left:     extend left + up
+        ]
+        let safe = CGRect(x: margin, y: margin,
+                          width: screenSize.width - 2 * margin, height: screenSize.height - 2 * margin)
+        for c in corners where safe.contains(CGRect(x: c.x, y: c.y, width: bw, height: bh)) {
+            return (CGPoint(x: c.x + bw / 2, y: c.y + bh / 2), c.below)
+        }
+        // Fallback: clamp the preferred bottom-right corner fully on-screen.
+        let cx = min(max(right + gap, margin), screenSize.width - margin - bw) + bw / 2
+        let cy = min(max(bottom + gap, margin), screenSize.height - margin - bh) + bh / 2
+        return (CGPoint(x: cx, y: cy), true)
+    }
+
+    // MARK: Guided walkthrough
+
+    /// The stops as `Target`s — each highlight rect's center + size + the house
+    /// corner radius. The model (or the demo) supplies the rects via `steps`.
+    private var targets: [Target] {
+        steps.map { s in
+            Target(center: CGPoint(x: s.rect.midX, y: s.rect.midY),
+                   size: s.rect.size,
+                   cornerRadius: houseRadius(s.rect.size),
+                   message: s.message)
+        }
+    }
+
+    private func runWalkthrough() {
+        Task { @MainActor in
+            // Born into the ring; hand off to the birth circle (no bubble yet),
+            // from the exact same circle so the swap is invisible.
+            try? await Task.sleep(for: .seconds(ringStart + walkthroughStart))
+            target = restCircle
+            walkthrough = true
+            try? await Task.sleep(for: .seconds(0.4))
+
+            // Morph through each highlight: morph (text swaps while hidden) →
+            // bubble in → dwell → bubble out.
+            for step in targets {
+                withAnimation(.spring(response: 0.55, dampingFraction: 0.78)) { target = step }
+                bubbleText = step.message        // swap INSTANTLY while hidden — no animated reflow
+                try? await Task.sleep(for: .seconds(0.55))            // let the morph + layout settle
+                withAnimation(bubbleIn) { bubbleShown = true }
+                try? await Task.sleep(for: .seconds(2.4))             // dwell
+                withAnimation(.easeInOut(duration: 0.32)) { bubbleShown = false }
+                bubbleText = ""
+                try? await Task.sleep(for: .seconds(0.34))
+            }
+
+            // Deliberate ending — the birth in REVERSE. Home to the birth circle,
+            // turn back into the black droplet, get sucked up into the notch.
+            withAnimation(.spring(response: 0.55, dampingFraction: 0.82)) { target = restCircle }
+            try? await Task.sleep(for: .seconds(0.7))
+            suckStart = Date()
+            sucking = true
+            withAnimation(.easeOut(duration: 0.2)) { glowOpacity = 0 }
+            try? await Task.sleep(for: .seconds(1.05))   // crossfade + rise + absorb
+            onFinished()
+        }
+    }
+
+    /// The birth circle, just below the notch — where the pointer is born and
+    /// where it returns to be sucked back in.
+    private var restCircle: Target {
+        Target(center: CGPoint(x: anchor.x, y: anchor.y + restDist),
+               size: CGSize(width: fullR * 2, height: fullR * 2), cornerRadius: fullR, message: "")
+    }
+
+    /// The reverse suck — the droplet rises from rest back UP into the source,
+    /// accelerating (sucked in). It crossfades in from the glow first, then climbs;
+    /// `metaballCanvas` re-forms the neck + absorbs it as it nears the notch.
+    private func suckSample(_ ts: Double) -> (pos: CGPoint, opacity: Double) {
+        let crossfade = 0.25, riseDur = 0.7
+        let rise = clamp((ts - crossfade) / riseDur)
+        let p = rise * rise                       // easeIn — accelerates UP as it's pulled in
+        let restY = anchor.y + restDist
+        let intoY = anchor.y - startInset         // up inside the source (absorbed, behind the notch)
+        let y = restY + (intoY - restY) * CGFloat(p)
+        return (CGPoint(x: anchor.x, y: y), clamp(ts / 0.15))   // black fades in as the glow fades out
+    }
+
+    /// Birth only — sampled from elapsed seconds. The source bar is constant, so
+    /// the connection "removes itself" purely through the neck thinning.
+    ///   • grip + hold (0–gripDur): the droplet creeps out, the fat neck holding on.
+    ///   • release (gripDur+): the thread snaps; the freed droplet springs past
+    ///     rest and rings down (inertia), then the label fades in.
+    private func sample(_ t: Double) -> (pos: CGPoint, r: CGFloat) {
+        // The droplet is ALWAYS full size; it starts hidden inside the source bar
+        // and travels out through the bottom edge — always part of the metaball
+        // mass, never inflating or popping into existence.
+        let startY = anchor.y - startInset
+        let endY = anchor.y + restDist
+        let p = travelEase(t)
+        return (CGPoint(x: anchor.x, y: startY + (endY - startY) * CGFloat(p)), fullR)
+    }
+
+    private func clamp(_ x: Double, _ lo: Double = 0, _ hi: Double = 1) -> Double { min(max(x, lo), hi) }
+    private func lerp(_ a: CGFloat, _ b: CGFloat, _ t: Double) -> CGFloat { a + (b - a) * CGFloat(t) }
+
+    /// A tapering, concave-waisted strand from the notch lip (`top`, width `wTop`)
+    /// down into the droplet (`bottom`, width `wBot`). The sides bow toward the
+    /// center axis (`neckPinch`) so the stretched neck reads as liquid, not a wedge.
+    private func neckPath(cx: CGFloat, top: CGFloat, bottom: CGFloat, wTop: CGFloat, wBot: CGFloat) -> Path {
+        let tl = CGPoint(x: cx - wTop / 2, y: top),  tr = CGPoint(x: cx + wTop / 2, y: top)
+        let bl = CGPoint(x: cx - wBot / 2, y: bottom), br = CGPoint(x: cx + wBot / 2, y: bottom)
+        let midY = (top + bottom) / 2
+        let lMid = (tl.x + bl.x) / 2, rMid = (tr.x + br.x) / 2
+        let lCtrl = lMid + (cx - lMid) * neckPinch   // pull each side in at the waist
+        let rCtrl = rMid + (cx - rMid) * neckPinch
+        var p = Path()
+        p.move(to: tl)
+        p.addQuadCurve(to: bl, control: CGPoint(x: lCtrl, y: midY))
+        p.addLine(to: br)
+        p.addQuadCurve(to: tr, control: CGPoint(x: rCtrl, y: midY))
+        p.closeSubpath()
+        return p
+    }
+
+    /// Tension → release. The build decelerates to a near-stall (the neck
+    /// stretches thin), then the release snaps out fast and overshoots back.
+    /// Grip → release with inertia. The creep decelerates into a hold (tension,
+    /// neck fat), then an underdamped spring carries the freed droplet past rest,
+    /// bounces, and rings down to settle.
+    private func travelEase(_ t: Double) -> Double {
+        if t < gripDur {
+            let b = t / gripDur
+            return gripTo * (1 - (1 - b) * (1 - b))             // easeOut creep → hold (tension)
+        } else {
+            return gripTo + (1 - gripTo) * springStep(t - gripDur, zeta: springZeta, omega: springOmega)
+        }
+    }
+
+    /// Underdamped spring step (0→1 with overshoot). springStep'(0) = 0, so it
+    /// leaves rest smoothly (no jolt); then it overshoots and rings down. Used for
+    /// the droplet's kinetic settle AND the ring's pop-in bounce.
+    private func springStep(_ s: Double, zeta: Double, omega: Double) -> Double {
+        let wd = omega * (1 - zeta * zeta).squareRoot()
+        let e = exp(-zeta * omega * s)
+        return 1 - e * (cos(wd * s) + (zeta * omega / wd) * sin(wd * s))
+    }
+}

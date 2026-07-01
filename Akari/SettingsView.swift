@@ -1,0 +1,195 @@
+import SwiftUI
+import AppKit
+import UniformTypeIdentifiers
+import KeyboardShortcuts
+
+extension KeyboardShortcuts.Name {
+    static let triggerCapture  = Self("triggerCapture")    // full-screen (chord alt for double-tap ⌥)
+    static let captureRegion   = Self("captureRegion")     // drag-to-select region
+    static let demoMetaball    = Self("demoMetaball")      // TEMP — demo the pointer spit-out
+}
+
+/// The settings content (the Form), with no window/panel chrome — so it can
+/// render as a page inside the notch. The notch page wraps it with a header.
+struct SettingsBody: View {
+    var body: some View {
+        Form {
+            Section {
+                LabeledContent("Default") {
+                    Text("Double-tap ⌥")
+                        .foregroundStyle(.secondary)
+                }
+                KeyboardShortcuts.Recorder("Capture screen (chord):", name: .triggerCapture)
+                KeyboardShortcuts.Recorder("Capture region (drag):", name: .captureRegion)
+            } header: {
+                Text("Hotkeys")
+            } footer: {
+                Text("Double-tap ⌥ captures the whole screen. The region chord opens a drag-to-select overlay for a specific area.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            WorkspaceSection()
+            ActivitySection()
+            PowerUserSection()
+        }
+        .formStyle(.grouped)
+    }
+}
+
+/// Shows the recent tool activity from the local audit log — the visible half of
+/// PRODUCT.md's "audit log" differentiator. Read-only; the data never leaves the Mac.
+private struct ActivitySection: View {
+    @State private var entries: [AuditEntry] = []
+
+    var body: some View {
+        Section {
+            if entries.isEmpty {
+                Text("No tool activity yet.")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else {
+                ForEach(entries) { e in
+                    HStack(spacing: 8) {
+                        Image(systemName: e.icon)
+                            .font(.system(size: 12))
+                            .foregroundStyle(e.color)
+                            .frame(width: 16)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(e.tool).font(.body)
+                            if !e.summary.isEmpty {
+                                Text(e.summary).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                            }
+                        }
+                        Spacer()
+                        Text(e.time).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            HStack {
+                Button("Reveal log in Finder", action: revealLog)
+                    .buttonStyle(.akariSolid)
+                Spacer()
+            }
+        } header: {
+            Text("Activity")
+        } footer: {
+            Text("Every tool Akari runs is recorded locally to audit.jsonl and never leaves your Mac. The 20 most recent are shown.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        .task { entries = (await AuditLog.shared.recent(20)).reversed().compactMap(AuditEntry.init) }
+    }
+
+    private func revealLog() {
+        Task { NSWorkspace.shared.activateFileViewerSelecting([await AuditLog.shared.fileURL]) }
+    }
+}
+
+/// One parsed audit-log line for display.
+private struct AuditEntry: Identifiable {
+    let id = UUID()
+    let tool: String
+    let outcome: String
+    let summary: String
+    let time: String
+
+    init?(_ jsonl: String) {
+        guard let d = jsonl.data(using: .utf8),
+              let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+              let name = o["tool"] as? String else { return nil }
+        tool = name.replacingOccurrences(of: "_", with: " ")
+        outcome = (o["outcome"] as? String) ?? "ok"
+        summary = (o["summary"] as? String) ?? ""
+        if let ts = o["ts"] as? String, let date = ISO8601DateFormatter().date(from: ts) {
+            let f = DateFormatter(); f.dateStyle = .none; f.timeStyle = .short
+            time = f.string(from: date)
+        } else {
+            time = ""
+        }
+    }
+
+    var icon: String {
+        switch outcome {
+        case "error":    return "xmark.circle.fill"
+        case "declined": return "minus.circle.fill"
+        default:         return "checkmark.circle.fill"
+        }
+    }
+    var color: Color {
+        switch outcome {
+        case "error":    return .red
+        case "declined": return .gray
+        default:         return .green
+        }
+    }
+}
+
+private struct PowerUserSection: View {
+    @State private var shellEnabled: Bool = ShellTool.shared.isEnabled
+
+    var body: some View {
+        Section {
+            Toggle("Enable shell tool", isOn: $shellEnabled)
+                .onChange(of: shellEnabled) { _, newValue in
+                    ShellTool.shared.setEnabled(newValue)
+                }
+        } header: {
+            Text("Power user")
+        } footer: {
+            Text("With the shell tool on, Akari can run commands in /bin/zsh — npm, pip, brew, git, build scripts, etc. Every command shown to you for confirmation, scoped to allowed folders, with a 60s timeout. Off by default. Treat this like giving Akari a terminal.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+}
+
+private struct WorkspaceSection: View {
+    @State private var displayPath: String = WorkspaceManager.shared.displayPath(WorkspaceManager.shared.workspaceURL)
+
+    var body: some View {
+        Section {
+            LabeledContent("Folder") {
+                Text(displayPath)
+                    .foregroundStyle(.secondary)
+                    .truncationMode(.middle)
+                    .lineLimit(1)
+            }
+            HStack(spacing: 8) {
+                Button("Change…", action: chooseFolder)
+                    .buttonStyle(.akariSolid)
+                Button("Reveal in Finder", action: revealInFinder)
+                    .buttonStyle(.akariSolid)
+                Spacer()
+            }
+        } header: {
+            Text("Workspace")
+        } footer: {
+            Text("Akari has standing read/write consent for this folder. File operations inside it run without per-call confirmation; destructive ops (delete, move) always confirm. Outside this folder, file operations are refused.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func chooseFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = true
+        panel.title = "Choose Akari Workspace Folder"
+        panel.prompt = "Use as Workspace"
+        panel.directoryURL = WorkspaceManager.shared.workspaceURL
+        if panel.runModal() == .OK, let url = panel.url {
+            WorkspaceManager.shared.setWorkspace(url)
+            displayPath = WorkspaceManager.shared.displayPath(url)
+        }
+    }
+
+    private func revealInFinder() {
+        do {
+            let url = try WorkspaceManager.shared.ensureWorkspaceExists()
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+        } catch {
+            NSSound.beep()
+        }
+    }
+}

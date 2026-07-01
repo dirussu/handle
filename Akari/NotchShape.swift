@@ -1,0 +1,188 @@
+import SwiftUI
+
+/// The notch silhouette — adapted from Boring Notch (originally
+/// DynamicNotchKit). The top corners flare OUTWARD (inverse radius) so the
+/// pill blends seamlessly into the hardware notch / screen bezel, and the
+/// bottom corners round normally. Both radii animate so the shape morphs
+/// smoothly between the closed pill and the open panel.
+struct NotchShape: Shape {
+    var topCornerRadius: CGFloat
+    var bottomCornerRadius: CGFloat
+
+    init(topCornerRadius: CGFloat = 6, bottomCornerRadius: CGFloat = 14) {
+        self.topCornerRadius = topCornerRadius
+        self.bottomCornerRadius = bottomCornerRadius
+    }
+
+    var animatableData: AnimatablePair<CGFloat, CGFloat> {
+        get { .init(topCornerRadius, bottomCornerRadius) }
+        set {
+            topCornerRadius = newValue.first
+            bottomCornerRadius = newValue.second
+        }
+    }
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+
+        path.move(to: CGPoint(x: rect.minX, y: rect.minY))
+
+        // Top-left: flare outward into the bezel.
+        path.addQuadCurve(
+            to: CGPoint(x: rect.minX + topCornerRadius, y: rect.minY + topCornerRadius),
+            control: CGPoint(x: rect.minX + topCornerRadius, y: rect.minY)
+        )
+
+        path.addLine(to: CGPoint(x: rect.minX + topCornerRadius, y: rect.maxY - bottomCornerRadius))
+
+        // Bottom-left: round normally.
+        path.addQuadCurve(
+            to: CGPoint(x: rect.minX + topCornerRadius + bottomCornerRadius, y: rect.maxY),
+            control: CGPoint(x: rect.minX + topCornerRadius, y: rect.maxY)
+        )
+
+        path.addLine(to: CGPoint(x: rect.maxX - topCornerRadius - bottomCornerRadius, y: rect.maxY))
+
+        // Bottom-right: round normally.
+        path.addQuadCurve(
+            to: CGPoint(x: rect.maxX - topCornerRadius, y: rect.maxY - bottomCornerRadius),
+            control: CGPoint(x: rect.maxX - topCornerRadius, y: rect.maxY)
+        )
+
+        path.addLine(to: CGPoint(x: rect.maxX - topCornerRadius, y: rect.minY + topCornerRadius))
+
+        // Top-right: flare outward into the bezel.
+        path.addQuadCurve(
+            to: CGPoint(x: rect.maxX, y: rect.minY),
+            control: CGPoint(x: rect.maxX - topCornerRadius, y: rect.minY)
+        )
+
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.minY))
+
+        return path
+    }
+}
+
+
+/// The VISIBLE outline of the notch as an OPEN path — left side down, around
+/// the bottom-left corner, across the bottom, around the bottom-right corner,
+/// up the right side. The flared top edge is omitted (it merges into the
+/// bezel). trim=0 is the upper-left, trim=1 the upper-right — so a comet
+/// sweeping 0→1→0 reads as a clean side-to-side along the notch's underside.
+struct NotchBottomOutline: Shape {
+    var topCornerRadius: CGFloat
+    var bottomCornerRadius: CGFloat
+
+    var animatableData: AnimatablePair<CGFloat, CGFloat> {
+        get { .init(topCornerRadius, bottomCornerRadius) }
+        set { topCornerRadius = newValue.first; bottomCornerRadius = newValue.second }
+    }
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX + topCornerRadius, y: rect.minY + topCornerRadius))
+        path.addLine(to: CGPoint(x: rect.minX + topCornerRadius, y: rect.maxY - bottomCornerRadius))
+        path.addQuadCurve(
+            to: CGPoint(x: rect.minX + topCornerRadius + bottomCornerRadius, y: rect.maxY),
+            control: CGPoint(x: rect.minX + topCornerRadius, y: rect.maxY)
+        )
+        path.addLine(to: CGPoint(x: rect.maxX - topCornerRadius - bottomCornerRadius, y: rect.maxY))
+        path.addQuadCurve(
+            to: CGPoint(x: rect.maxX - topCornerRadius, y: rect.maxY - bottomCornerRadius),
+            control: CGPoint(x: rect.maxX - topCornerRadius, y: rect.maxY)
+        )
+        path.addLine(to: CGPoint(x: rect.maxX - topCornerRadius, y: rect.minY + topCornerRadius))
+        return path
+    }
+}
+
+/// Akari's "working" cue — a hot white head + fading gradient tail with a soft
+/// both-sided glow, riding a shape's border. Generic over the shape AND the
+/// motion:
+///   • `loops: true`  → orbits a closed shape continuously (the input bubble).
+///   • `loops: false` → sweeps an open path side-to-side, easing at each end,
+///     the tail collapsing into the head at the turnarounds (the notch).
+/// Identical visual style in both; only the motion differs.
+struct BorderComet<S: Shape>: View {
+    var shape: S
+    var loops: Bool
+    var period: Double = 7.6
+    var tailLength: CGFloat = 0.18    // fraction of the path the tail spans
+    var lineWidth: CGFloat = 1.2      // head thickness (tail scales from this)
+    var glow: Double = 0.75           // glow intensity (the tight shadow's opacity)
+
+    private let segments = 52
+
+    var body: some View {
+        TimelineView(.animation) { timeline in
+            let u = (timeline.date.timeIntervalSinceReferenceDate / period)
+                .truncatingRemainder(dividingBy: 1)
+            let m = motion(at: u)   // (head, dir, tailScale)
+            let step = (tailLength * m.tailScale) / CGFloat(segments)
+
+            // Draw the whole comet in ONE Canvas (imperative path stroking) instead
+            // of ~50–100 SwiftUI trim/stroke views per frame — those re-diffed every
+            // frame at 120fps and saturated the main thread, starving the inference
+            // stream (the "app doesn't respond" hang). Visual is identical.
+            Canvas { ctx, size in
+                let path = shape.path(in: CGRect(origin: .zero, size: size))
+                // Gradient tail — overlapping thin segments, fading fast. Each
+                // overlaps ~6 steps into its neighbour so the line stays even
+                // around corners.
+                for i in stride(from: segments - 1, through: 0, by: -1) {
+                    let f = CGFloat(i)
+                    let fade = pow(Double(1 - f / CGFloat(segments)), 2.6)
+                    strokeComet(ctx, path, m.head - m.dir * (f + 6) * step, m.head - m.dir * f * step,
+                                color: .white.opacity(fade * 0.7), width: lineWidth * 0.85)
+                }
+                // Bright head.
+                strokeComet(ctx, path, m.head - 0.008, m.head + 0.008, color: .white, width: lineWidth)
+            }
+            // Soft glow via shadow — blooms symmetrically on both sides.
+            .shadow(color: .white.opacity(glow), radius: 3)
+            .shadow(color: .white.opacity(glow * 0.6), radius: 7)
+        }
+        .allowsHitTesting(false)
+    }
+
+    /// Head position, travel direction, and tail-length scale for the current
+    /// phase `u` (0…1). Plain function (not in the ViewBuilder) so the
+    /// orbit-vs-sweep branch doesn't confuse the result builder.
+    private func motion(at u: Double) -> (head: CGFloat, dir: CGFloat, tailScale: CGFloat) {
+        if loops {
+            return (CGFloat(u), 1, 1)   // orbit: forward, full tail
+        }
+        // Sweep: triangle 0→1→0, smoothstepped (eases at the turnarounds);
+        // tail collapses into the head as speed → 0 at each end.
+        let tri = u < 0.5 ? u * 2 : 2 - u * 2
+        let head = CGFloat(tri * tri * (3 - 2 * tri))
+        let dir: CGFloat = u < 0.5 ? 1 : -1
+        let tailScale = CGFloat(0.08 + 0.92 * (4 * tri * (1 - tri)))
+        return (head, dir, tailScale)
+    }
+
+    /// Stroke the comet's [from,to] span into the Canvas (one range, or two when an
+    /// orbit wraps the 0/1 seam).
+    private func strokeComet(_ ctx: GraphicsContext, _ path: Path, _ from: CGFloat, _ to: CGFloat,
+                             color: Color, width: CGFloat) {
+        for r in ranges(from, to) {
+            ctx.stroke(path.trimmedPath(from: r.0, to: r.1),
+                       with: .color(color), style: StrokeStyle(lineWidth: width, lineCap: .round))
+        }
+    }
+
+    /// Orbit wraps across the 0/1 seam; sweep clamps to the open path's [0,1].
+    private func ranges(_ from: CGFloat, _ to: CGFloat) -> [(CGFloat, CGFloat)] {
+        if loops {
+            func mod1(_ x: CGFloat) -> CGFloat {
+                let r = x.truncatingRemainder(dividingBy: 1)
+                return r < 0 ? r + 1 : r
+            }
+            let a = mod1(from), b = mod1(to)
+            return a <= b ? [(a, b)] : [(a, 1), (0, b)]
+        } else {
+            let lo = max(0, min(from, to)), hi = min(1, max(from, to))
+            return hi > lo ? [(lo, hi)] : []
+        }
+    }
+}
