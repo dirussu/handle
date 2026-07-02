@@ -36,10 +36,14 @@ final class LocalEngine: ObservableObject {
 
     // MARK: - Configuration
 
-    /// Vision-language model. Qwen 2.5 VL 7B 4-bit (~5 GB on disk).
-    /// Stable MLX support; swap to Qwen 3 VL when its upstream
-    /// tied-embedding crash is fixed.
-    private let visionModelID = "mlx-community/Qwen2.5-VL-7B-Instruct-4bit"
+    /// Vision-language model: Qwen 3 VL 4B 4-bit (~2.5 GB on disk). Chosen over the old
+    /// Qwen 2.5-VL 7B and Gemma 3 4B by a head-to-head pointing eval on real macOS UI
+    /// (2026-07-02, see EVALS.md): Qwen3-VL 4B scored 8/8 twice; the 7B 5–7/8 (slower,
+    /// less consistent, adjacent-element slips, one no-parse ramble); Gemma 3 4B 5/8
+    /// (hallucinated a click on a negative). It's also HALF the 7B's size — a RAM win on
+    /// 16 GB Macs — and first-class in mlx-swift-examples 2.29.1 (the old tied-embedding
+    /// blocker is resolved). Flip back: 7B id = "mlx-community/Qwen2.5-VL-7B-Instruct-4bit".
+    private let visionModelID = "lmstudio-community/Qwen3-VL-4B-Instruct-MLX-4bit"
 
     /// Cap the longest image edge before inference. 1568 matches
     /// Anthropic's API default and is the accuracy/speed knee we'll tune.
@@ -81,7 +85,12 @@ final class LocalEngine: ObservableObject {
             self.visionState = .downloading(0)
             log.info("Loading vision model \(self.visionModelID, privacy: .public)…")
 
-            let configuration = ModelConfiguration(id: visionModelID)
+            // Gemma 3 needs <end_of_turn> registered as an EOS token or generation
+            // runs to maxTokens instead of stopping. Harmless for the Qwen models.
+            let configuration = ModelConfiguration(
+                id: visionModelID,
+                extraEOSTokens: visionModelID.contains("gemma") ? ["<end_of_turn>"] : []
+            )
             let container = try await VLMModelFactory.shared.loadContainer(
                 hub: HubApi(),
                 configuration: configuration
