@@ -709,6 +709,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 if display { conversation.appendChunk(at: assistantIdx, delta) }
             }
             agentLog.info("streamOneTurn: finished — \(deltaCount) deltas, \(buf.count) chars, \(String(format: "%.1f", Date().timeIntervalSince(streamStart)))s")
+            #if DEBUG
+            agentLog.info("streamOneTurn: answer=\"\(buf.replacingOccurrences(of: "\n", with: " ").prefix(600), privacy: .public)\"")
+            #endif
             if display { conversation.finishAssistantStream(at: assistantIdx) } else { conversation.isAwaitingResponse = false }
             return buf
         } catch {
