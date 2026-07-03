@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwiftUI
 
 /// One stop in a guided walkthrough: a screen-space rect to outline + its message.
@@ -16,11 +17,19 @@ struct GuideStep {
 ///
 /// Full-screen, click-through overlay. (Flying it to a target to actually point
 /// at things is the next phase; this nails the birth.)
+/// Bridges controller → view for externally-ended runs (listening): flipping
+/// `ending` tells the view to play the reverse suck and dismiss.
+@MainActor
+final class PointerSession: ObservableObject {
+    @Published var ending = false
+}
+
 @MainActor
 final class MetaballPointer {
     static let shared = MetaballPointer()
     private var panel: NSPanel?
     private var hideTask: Task<Void, Never>?
+    private var listenSession: PointerSession?
     private init() {}
 
     /// Drive a guided walkthrough: the pointer is born from the notch, its glowing
@@ -31,7 +40,22 @@ final class MetaballPointer {
         present(steps: steps, on: screen)
     }
 
-    private func present(steps: [GuideStep], on screen: NSScreen) {
+    /// LISTENING: the same birth, but instead of turning into the glowing ring the
+    /// droplet stays black with the dictation bars inside. Ends via stopListening()
+    /// → the same reverse suck as the walkthrough.
+    func listen(on screen: NSScreen) {
+        let session = PointerSession()
+        listenSession = session
+        present(steps: [], on: screen, listening: true, session: session)
+    }
+
+    func stopListening() {
+        listenSession?.ending = true
+        listenSession = nil
+    }
+
+    private func present(steps: [GuideStep], on screen: NSScreen,
+                         listening: Bool = false, session: PointerSession? = nil) {
         clear()
 
         let panel = ClickThroughPanel(
@@ -64,7 +88,9 @@ final class MetaballPointer {
             anchor: anchor,
             steps: steps,
             screenSize: screen.frame.size,
-            onFinished: { [weak self] in self?.fadeOut() }   // the tour retracted into the notch — dismiss
+            onFinished: { [weak self] in self?.fadeOut() },  // retracted into the notch — dismiss
+            listening: listening,
+            session: session ?? PointerSession()
         )
         let host = NSHostingView(rootView: view)
         host.frame = NSRect(origin: .zero, size: screen.frame.size)
@@ -73,10 +99,10 @@ final class MetaballPointer {
         self.panel = panel
 
         hideTask = Task { @MainActor [weak self] in
-            // SAFETY fallback only — the walkthrough now dismisses itself when it
-            // retracts into the notch (`onFinished`). This just guarantees the
-            // overlay never gets stuck if that Task dies mid-tour.
-            try? await Task.sleep(for: .seconds(22))
+            // SAFETY fallback only — the walkthrough/listening run dismisses itself
+            // (`onFinished`). This just guarantees the overlay never gets stuck.
+            // Listening is user-paced (a long dictation), so give it far longer.
+            try? await Task.sleep(for: .seconds(listening ? 130 : 22))
             guard !Task.isCancelled else { return }
             self?.fadeOut()
         }
@@ -143,6 +169,11 @@ private struct MetaballPointerView: View {
     let steps: [GuideStep]    // the walkthrough stops — screen-space rects + messages
     let screenSize: CGSize       // the full overlay size — keeps the bubble on-screen
     let onFinished: () -> Void   // called when the tour finishes (retracted into the notch)
+    // LISTENING mode: the same birth, but the droplet STAYS the solid black metaball
+    // (no ring crossfade, no walkthrough) with dictation bars inside, until the
+    // session's `ending` flips → reverse suck. The bars read the live mic level.
+    var listening: Bool = false
+    @ObservedObject var session: PointerSession = PointerSession()
 
     @State private var start: Date?
     // Walkthrough (state-driven; takes over once the birth settles). The glow
@@ -212,28 +243,43 @@ private struct MetaballPointerView: View {
                 let t = start.map { timeline.date.timeIntervalSince($0) } ?? 0
                 let s = sample(t)
                 let ring = clamp((t - ringStart) / ringFade)
-                let metaball = 1 - clamp((t - ringStart) / 0.22)   // black drains as the ring fades in
+                // Walkthrough: black drains as the ring fades in. Listening: the drop
+                // STAYS black (the bars live inside it) until the suck takes over.
+                let metaball = listening ? (sucking ? 0 : 1) : 1 - clamp((t - ringStart) / 0.22)
+                let micLevel = CGFloat(SpeechService.shared.level)
                 ZStack {
                     if metaball > 0.001 {
                         metaballCanvas(pos: s.pos, r: s.r).opacity(metaball)
                     }
                     // The birth ring — a SIMPLE crossfade (black drains, ring fades
                     // in; no pop, no bounce). Shown only until the walkthrough takes
-                    // over from the exact same circle, so the swap is invisible.
-                    if !walkthrough && ring > 0.001 {
+                    // over from the exact same circle. Never in listening mode.
+                    if !listening && !walkthrough && ring > 0.001 {
                         glowShape(size: CGSize(width: fullR * 2, height: fullR * 2), cornerRadius: fullR)
                             .position(x: anchor.x, y: anchor.y + restDist)
                             .opacity(ring)
                     }
 
+                    // Dictation bars — inside the settled black drop, riding its
+                    // position (so they follow the last spring wobble). Fade in where
+                    // the ring would have; gone the instant the suck starts.
+                    if listening && !sucking {
+                        let barAlpha = clamp((t - (gripDur + 0.45)) / 0.3)
+                        if barAlpha > 0.001 {
+                            barsCanvas(pos: s.pos, level: micLevel, time: t, alpha: barAlpha)
+                        }
+                    }
+
                     // Ending — the reverse metaball: the droplet rises back up and
                     // is sucked into the notch. The neck re-forms on its own as it
                     // nears the source (same machinery as the birth, run upward).
+                    // (Listening: the drop is already black at rest — no crossfade,
+                    // full opacity from the first frame so there's no flicker.)
                     if sucking, let ss = suckStart {
                         let ts = timeline.date.timeIntervalSince(ss)
                         if ts >= 0 {
                             let sk = suckSample(ts)
-                            metaballCanvas(pos: sk.pos, r: fullR).opacity(sk.opacity)
+                            metaballCanvas(pos: sk.pos, r: fullR).opacity(listening ? 1 : sk.opacity)
                         }
                     }
                 }
@@ -265,7 +311,46 @@ private struct MetaballPointerView: View {
         .ignoresSafeArea()
         .onAppear {
             start = Date()
-            runWalkthrough()
+            if !listening { runWalkthrough() }   // listening ends via session.ending, not a script
+        }
+        .onChange(of: session.ending) { _, ending in
+            if ending { beginSuck() }
+        }
+    }
+
+    /// The deliberate ending, shared shape with the walkthrough's: reverse suck up
+    /// into the notch, then dismiss. Used by listening mode (externally triggered).
+    private func beginSuck() {
+        guard !sucking else { return }
+        suckStart = Date()
+        sucking = true
+        withAnimation(.easeOut(duration: 0.2)) { glowOpacity = 0 }
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(1.05))   // rise + absorb
+            onFinished()
+        }
+    }
+
+    /// The dictation bars — 5 compact white bars centered in the drop, amplitude-
+    /// driven (symmetric envelope, idle shimmer so they breathe when quiet). ONE
+    /// Canvas, no filters — cheap per frame, can't starve inference (comet lesson).
+    private func barsCanvas(pos: CGPoint, level: CGFloat, time: Double, alpha: Double) -> some View {
+        Canvas { ctx, _ in
+            let barCount = 5
+            let barW: CGFloat = 2.2, barGap: CGFloat = 2.2
+            let span = CGFloat(barCount - 1) * (barW + barGap)
+            let maxBar = fullR * 0.95, minBar: CGFloat = 2.5
+            for i in 0..<barCount {
+                let x = pos.x - span / 2 + CGFloat(i) * (barW + barGap)
+                let d = abs(CGFloat(i) - CGFloat(barCount - 1) / 2) / (CGFloat(barCount - 1) / 2)
+                let envelope = 1 - 0.45 * d
+                let shimmer = 0.5 + 0.5 * sin(time * 6 + Double(i) * 0.9)
+                let energy = level * envelope + CGFloat(shimmer) * 0.18 * envelope
+                let h = max(minBar, min(maxBar, minBar + energy * (maxBar - minBar)))
+                let bar = CGRect(x: x - barW / 2, y: pos.y - h / 2, width: barW, height: h)
+                ctx.fill(Path(roundedRect: bar, cornerRadius: barW / 2),
+                         with: .color(.white.opacity(alpha)))
+            }
         }
     }
 

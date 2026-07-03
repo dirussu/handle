@@ -199,13 +199,6 @@ final class NotchController {
         for n in notches { n.vm.isWorking = working }
     }
 
-    /// Show/hide the listening drop (mic bars) on the closed notch while recording.
-    func setListening(_ listening: Bool) {
-        install()
-        for n in notches {
-            withAnimation(.smooth(duration: 0.28)) { n.vm.isListening = listening }
-        }
-    }
 
     /// The notch surface's current bottom edge on `screen`, in top-left screen
     /// coords (the window's top sits at the screen top). Anchors the pointer's

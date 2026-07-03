@@ -156,17 +156,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private func beginVoiceCapture() async {
         guard !isVoiceRecording, !isPresentingOverlay else { return }
         isVoiceRecording = true
-        NotchController.shared.setListening(true)   // mic-bars drop while recording
+        // The pointer's own birth animation, settling into the dictation bars
+        // instead of the glow ring. Sucks back in when the key is released.
+        let screen = NotchController.shared.openPanelScreen() ?? PointingOverlay.currentScreen()
+        MetaballPointer.shared.listen(on: screen)
         await SpeechService.shared.startRecording()
     }
 
     /// Key-up: stop, transcribe, and run the spoken command like a typed one.
+    /// The release cue IS the pointer's reverse suck — the notch swallows the blob
+    /// (brand identity). Transcription runs DURING the suck; the panel waits for the
+    /// collapse to finish so it never opens over the animation and hides it.
     private func endVoiceCaptureAndRun() async {
         guard isVoiceRecording else { return }
         isVoiceRecording = false
+        MetaballPointer.shared.stopListening()               // suck starts (~1.05s + fade)
+        let suckBeat = Task { try? await Task.sleep(for: .seconds(1.15)) }
         let transcript = await SpeechService.shared.stopRecordingAndTranscribe()
-        NotchController.shared.setListening(false)   // bars go; the loop shows the comet next
         let text = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+        _ = await suckBeat.value                             // let the collapse land
         guard !text.isEmpty else { NSSound.beep(); return }
         await handleVoiceCommand(transcript: text)
     }
@@ -958,9 +966,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 else if cmd == "__trigapptest__" { self?.runTrigAppTest() }
                 else if cmd == "__permstest__" { await self?.runPermsTest() }
                 else if cmd == "__listentest__" {
-                    // Show the listening drop (idle-shimmer, no mic); auto-off after 12s.
-                    NotchController.shared.setListening(true)
-                    Task { @MainActor in try? await Task.sleep(for: .seconds(12)); NotchController.shared.setListening(false) }
+                    // Play the listening pointer (birth → bars idle-shimmer → suck) card-less.
+                    let screen = NotchController.shared.openPanelScreen() ?? PointingOverlay.currentScreen()
+                    MetaballPointer.shared.listen(on: screen)
+                    Task { @MainActor in try? await Task.sleep(for: .seconds(7)); MetaballPointer.shared.stopListening() }
                 }
                 else if cmd == "__grabscreen__" {
                     // Akari writes its OWN screen capture to /tmp (it holds Screen

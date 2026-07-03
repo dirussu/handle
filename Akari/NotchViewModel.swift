@@ -24,7 +24,6 @@ final class NotchViewModel: ObservableObject {
     @Published var phase: NotchPhase = .closed
     @Published var route: NotchRoute = .chat
     @Published var isWorking: Bool = false
-    @Published var isListening: Bool = false   // recording voice → show the mic-bars drop
     @Published var pinned: Bool = false
 
     /// Measured height of the rendered notch surface (pill when closed, panel
