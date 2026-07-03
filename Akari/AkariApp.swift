@@ -965,6 +965,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 else if cmd == "__trigtest__" { self?.runTrigTest() }
                 else if cmd == "__trigapptest__" { self?.runTrigAppTest() }
                 else if cmd == "__permstest__" { await self?.runPermsTest() }
+                else if cmd == "__voicereltest__" {
+                    // The REAL push-to-talk path, headless: begin (mic records silence),
+                    // hold 3s, release — exercises the exact keyUp code incl. transcribe.
+                    await self?.beginVoiceCapture()
+                    try? await Task.sleep(for: .seconds(3))
+                    await self?.endVoiceCaptureAndRun()
+                }
                 else if cmd == "__listentest__" {
                     // Play the listening pointer (birth → bars idle-shimmer → suck) card-less.
                     let screen = NotchController.shared.openPanelScreen() ?? PointingOverlay.currentScreen()

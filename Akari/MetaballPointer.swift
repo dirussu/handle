@@ -1,6 +1,9 @@
 import AppKit
 import Combine
 import SwiftUI
+import os.log
+
+private let ptrLog = Logger(subsystem: "com.dimarussu.Akari", category: "Agent")
 
 /// One stop in a guided walkthrough: a screen-space rect to outline + its message.
 /// (Screen points, top-left origin — already mapped from the capture's pixels by
@@ -44,12 +47,14 @@ final class MetaballPointer {
     /// droplet stays black with the dictation bars inside. Ends via stopListening()
     /// → the same reverse suck as the walkthrough.
     func listen(on screen: NSScreen) {
+        ptrLog.info("pointer: listen()")
         let session = PointerSession()
         listenSession = session
         present(steps: [], on: screen, listening: true, session: session)
     }
 
     func stopListening() {
+        ptrLog.info("pointer: stopListening session=\(self.listenSession == nil ? "nil!" : "live", privacy: .public)")
         listenSession?.ending = true
         listenSession = nil
     }
@@ -262,11 +267,17 @@ private struct MetaballPointerView: View {
 
                     // Dictation bars — inside the settled black drop, riding its
                     // position (so they follow the last spring wobble). Fade in where
-                    // the ring would have; gone the instant the suck starts.
-                    if listening && !sucking {
-                        let barAlpha = clamp((t - (gripDur + 0.45)) / 0.3)
+                    // the ring would have; on release they MELT OUT over ~0.2s (the
+                    // ring's fade, same beat) while the drop holds, before the rise.
+                    if listening {
+                        let meltOut = sucking
+                            ? (suckStart.map { 1 - clamp(timeline.date.timeIntervalSince($0) / 0.2) } ?? 1)
+                            : 1
+                        let barAlpha = clamp((t - (gripDur + 0.45)) / 0.3) * meltOut
                         if barAlpha > 0.001 {
-                            barsCanvas(pos: s.pos, level: micLevel, time: t, alpha: barAlpha)
+                            // During the suck's hold the drop sits at rest — pin the bars there.
+                            let pos = sucking ? CGPoint(x: anchor.x, y: anchor.y + restDist) : s.pos
+                            barsCanvas(pos: pos, level: micLevel, time: t, alpha: barAlpha)
                         }
                     }
 
@@ -311,9 +322,11 @@ private struct MetaballPointerView: View {
         .ignoresSafeArea()
         .onAppear {
             start = Date()
+            ptrLog.info("pointer: view onAppear listening=\(listening, privacy: .public)")
             if !listening { runWalkthrough() }   // listening ends via session.ending, not a script
         }
         .onChange(of: session.ending) { _, ending in
+            ptrLog.info("pointer: onChange ending=\(ending, privacy: .public) sucking=\(sucking, privacy: .public)")
             if ending { beginSuck() }
         }
     }
@@ -321,12 +334,14 @@ private struct MetaballPointerView: View {
     /// The deliberate ending, shared shape with the walkthrough's: reverse suck up
     /// into the notch, then dismiss. Used by listening mode (externally triggered).
     private func beginSuck() {
-        guard !sucking else { return }
+        guard !sucking else { ptrLog.info("pointer: beginSuck IGNORED (already sucking)"); return }
+        ptrLog.info("pointer: beginSuck")
         suckStart = Date()
         sucking = true
         withAnimation(.easeOut(duration: 0.2)) { glowOpacity = 0 }
         Task { @MainActor in
             try? await Task.sleep(for: .seconds(1.05))   // rise + absorb
+            ptrLog.info("pointer: suck done -> dismiss")
             onFinished()
         }
     }
