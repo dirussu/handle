@@ -1,5 +1,5 @@
 {
-  "originHash" : "95631d821a466d5f5e5fd7385cbe103e73001d195750742ef3cfe654b9ed084e",
+  "originHash" : "432ffcb5eea03ef1e391afec191d43ebe4ea68db20cd1b53b5970d1cdb396438",
   "pins" : [
     {
       "identity" : "gzipswift",
@@ -44,6 +44,15 @@
       "state" : {
         "revision" : "2849f5323265386e200484b0d0f896e73c3411b9",
         "version" : "6.0.1"
+      }
+    },
+    {
+      "identity" : "swift-argument-parser",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/apple/swift-argument-parser.git",
+      "state" : {
+        "revision" : "6a52f3251125d74daf04fcbd5e6f08a75d074382",
+        "version" : "1.8.2"
       }
     },
     {
@@ -97,6 +106,15 @@
       "location" : "https://github.com/huggingface/swift-transformers",
       "state" : {
         "revision" : "a2e184dddb4757bc943e77fbe99ac6786c53f0b2",
+        "version" : "1.0.0"
+      }
+    },
+    {
+      "identity" : "whisperkit",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/argmaxinc/WhisperKit",
+      "state" : {
+        "revision" : "25c62997041c134b03ca82731ce2f6fd2cae1eb9",
         "version" : "1.0.0"
       }
     }

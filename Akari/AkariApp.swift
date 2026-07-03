@@ -134,6 +134,74 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         KeyboardShortcuts.onKeyDown(for: .demoMetaball) { [weak self] in
             self?.runHighlightTest()
         }
+
+        // Push-to-talk: HOLD the shortcut to record, release to transcribe + run.
+        // Default ⌃⌥Space if unset; rebindable in Settings.
+        if KeyboardShortcuts.getShortcut(for: .pushToTalk) == nil {
+            KeyboardShortcuts.setShortcut(.init(.space, modifiers: [.control, .option]), for: .pushToTalk)
+        }
+        KeyboardShortcuts.onKeyDown(for: .pushToTalk) { [weak self] in
+            Task { @MainActor in await self?.beginVoiceCapture() }
+        }
+        KeyboardShortcuts.onKeyUp(for: .pushToTalk) { [weak self] in
+            Task { @MainActor in await self?.endVoiceCaptureAndRun() }
+        }
+    }
+
+    // MARK: - Voice (push-to-talk)
+
+    private var isVoiceRecording = false
+
+    /// Key-down: start on-device recording (WhisperKit). First use prompts for Mic.
+    private func beginVoiceCapture() async {
+        guard !isVoiceRecording, !isPresentingOverlay else { return }
+        isVoiceRecording = true
+        NotchController.shared.setWorking(true)   // "engaged" cue while listening
+        await SpeechService.shared.startRecording()
+    }
+
+    /// Key-up: stop, transcribe, and run the spoken command like a typed one.
+    private func endVoiceCaptureAndRun() async {
+        guard isVoiceRecording else { return }
+        isVoiceRecording = false
+        let transcript = await SpeechService.shared.stopRecordingAndTranscribe()
+        let text = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { NotchController.shared.setWorking(false); NSSound.beep(); return }
+        await handleVoiceCommand(transcript: text)
+    }
+
+    /// A spoken command IS a screen-aware command: capture what the user is looking at,
+    /// stage the transcript as the user message, and run the SAME loop as a typed turn
+    /// (isInitial:false → click/point/recipe/act routing all apply). Then, if enabled,
+    /// speak the reply. Mirrors the capture + runToolLoop setup used everywhere else.
+    @MainActor
+    private func handleVoiceCommand(transcript: String) async {
+        let frontApp = NSWorkspace.shared.frontmostApplication
+        let appName = frontApp?.localizedName ?? "(unknown)"
+        let bundleID = frontApp?.bundleIdentifier
+        let cursor = NSEvent.mouseLocation
+        let screen = NSScreen.screens.first(where: { $0.frame.contains(cursor) }) ?? NSScreen.main
+        let rect = screen.map { CGRect(origin: .zero, size: $0.frame.size) } ?? .zero
+
+        var image: CGImage? = nil
+        var pixelSize: CGSize = .zero
+        var axElements: [AXElement] = []
+        if let screen, let raw = try? await ScreenCapture.captureRegion(rect, on: screen) {
+            let prepared = ImagePreparation.prepareForAPI(raw)
+            image = prepared.image; pixelSize = prepared.pixelSize
+            axElements = AccessibilityProbe.elements(in: rect, of: bundleID, limit: 25)
+        }
+        let convo = Conversation(chatWithApp: appName)
+        convo.updateCurrentCapture(rect: rect, screen: screen, imagePixelSize: pixelSize, axElements: axElements)
+        convo.addUserMessage(transcript, image: image, imagePixelSize: image != nil ? pixelSize : nil)
+        activeConversation = convo
+        presentConversation(convo)
+        agentLog.info("voice: command=\"\(transcript, privacy: .public)\" app=\(bundleID ?? "?", privacy: .public) ax=\(axElements.count)")
+        await runToolLoop(in: convo, isInitial: false, action: convo.initialAction)
+        if VoiceSettings.speakReplies,
+           let reply = convo.messages.last(where: { $0.role == .assistant && !$0.text.isEmpty })?.text {
+            SpeechSynth.shared.speak(reply)
+        }
     }
 
     /// Force-enable accessibility on each app as it comes to the foreground, so
@@ -889,6 +957,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 else if cmd == "__trigapptest__" { self?.runTrigAppTest() }
                 else if cmd == "__permstest__" { await self?.runPermsTest() }
                 else if cmd.hasPrefix("__clicktest__ ") { await self?.runPointingHarness(query: String(cmd.dropFirst(14)), click: true) }
+                else if cmd.hasPrefix("__voicefile__ ") {
+                    let t = await SpeechService.shared.transcribe(fileURL: URL(fileURLWithPath: String(cmd.dropFirst(14))))
+                    agentLog.info("voicefile: transcript=\"\(t, privacy: .public)\"")
+                }
+                else if cmd.hasPrefix("__voicecmd__ ") {
+                    // Drive the transcript→capture→loop path with given text (no mic).
+                    await self?.handleVoiceCommand(transcript: String(cmd.dropFirst(13)))
+                }
                 else if cmd.hasPrefix("__trigparse__ ") {
                     let goal = String(cmd.dropFirst(14))
                     let hit = self?.hasEventTriggerHint(goal) ?? false
@@ -1482,6 +1558,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         check("asksToClick explain→false", !promptAsksToClick("explain what's on screen"))
         check("asksToPoint click→false now", !promptAsksToPoint("click on the send button"))
         check("asksToPoint where still", promptAsksToPoint("where is the send button"))
+        // Voice — transcript + spoken-reply cleanup
+        check("stt clean brackets", SpeechService.clean("[BLANK_AUDIO] set the volume to 20 (silence)") == "set the volume to 20")
+        check("stt clean tags", SpeechService.clean("<|startoftranscript|> click the send button") == "click the send button")
+        check("stt clean plain", SpeechService.clean("  empty the trash  ") == "empty the trash")
+        check("tts strip markdown", SpeechSynth.spokenForm("**Clicked** `Send` [link](x)") == "Clicked Send link")
+        check("tts trims code", !SpeechSynth.spokenForm("hi ```swift\nlet x = 1\n``` bye").contains("let x"))
+        check("tts caps length", SpeechSynth.spokenForm(String(repeating: "word. ", count: 500)).count <= 601)
         agentLog.info("selftest DONE: \(pass) pass, \(fail) fail")
     }
 

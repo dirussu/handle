@@ -1,6 +1,7 @@
 import Foundation
 import AppKit
 import ApplicationServices
+import AVFoundation
 import CoreGraphics
 import CoreLocation
 import EventKit
@@ -65,6 +66,18 @@ enum PermissionsService {
         case .notDetermined:            return .notDetermined
         default:                        return .denied
         }
+    }
+
+    static func microphone() -> Status {
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .authorized:    return .granted
+        case .notDetermined: return .notDetermined
+        default:             return .denied
+        }
+    }
+
+    static func requestMicrophone() {
+        AVCaptureDevice.requestAccess(for: .audio) { _ in }
     }
 
     // MARK: - Automation (AppleEvents) — per-target-app

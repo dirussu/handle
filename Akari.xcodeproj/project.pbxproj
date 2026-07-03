@@ -12,6 +12,7 @@
 		0B5BD5792FDFF0BE00CA19FA /* MLXVLM in Frameworks */ = {isa = PBXBuildFile; productRef = 0B5BD5782FDFF0BE00CA19FA /* MLXVLM */; };
 		0BC473EF2FAE022C00A52524 /* KeyboardShortcuts in Frameworks */ = {isa = PBXBuildFile; productRef = 0BC473EE2FAE022C00A52524 /* KeyboardShortcuts */; };
 		0BC474002FAE1A1A00A52524 /* MarkdownUI in Frameworks */ = {isa = PBXBuildFile; productRef = 0BC473FF2FAE1A1A00A52524 /* MarkdownUI */; };
+		3960FBE8EC7F8A14C0F675B2 /* WhisperKit in Frameworks */ = {isa = PBXBuildFile; productRef = C1110A8DE0A6D8F83F9B0F99 /* WhisperKit */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -21,6 +22,8 @@
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		0BC473C52FADFE4800A52524 /* Akari */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+			);
 			path = Akari;
 			sourceTree = "<group>";
 		};
@@ -36,6 +39,7 @@
 				0BC473EF2FAE022C00A52524 /* KeyboardShortcuts in Frameworks */,
 				0B5BD5772FDFF0BE00CA19FA /* MLXLMCommon in Frameworks */,
 				0BC474002FAE1A1A00A52524 /* MarkdownUI in Frameworks */,
+				3960FBE8EC7F8A14C0F675B2 /* WhisperKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -83,6 +87,7 @@
 				0B5BD5742FDFF0BE00CA19FA /* MLXLLM */,
 				0B5BD5762FDFF0BE00CA19FA /* MLXLMCommon */,
 				0B5BD5782FDFF0BE00CA19FA /* MLXVLM */,
+				C1110A8DE0A6D8F83F9B0F99 /* WhisperKit */,
 			);
 			productName = Akari;
 			productReference = 0BC473C32FADFE4800A52524 /* Akari.app */;
@@ -116,6 +121,7 @@
 				0BC473ED2FAE022C00A52524 /* XCRemoteSwiftPackageReference "KeyboardShortcuts" */,
 				0BC473FE2FAE1A1A00A52524 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */,
 				0B5BD5732FDFF0BE00CA19FA /* XCRemoteSwiftPackageReference "mlx-swift-examples" */,
+				08F15245FDEC7E02B21F863F /* XCRemoteSwiftPackageReference "WhisperKit" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 0BC473C42FADFE4800A52524 /* Products */;
@@ -291,11 +297,12 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSAppleEventsUsageDescription = "Akari uses System Events to paste drafted replies into the chat field you have focused — for example, when you ask it to draft a message in iMessage.";
-				INFOPLIST_KEY_NSLocationUsageDescription = "Akari reads your Wi-Fi network name to run join-this-network automations. It never leaves your Mac.";
-				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Akari reads your Wi-Fi network name to run join-this-network automations. It never leaves your Mac.";
 				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "Akari uses your calendar to create events you ask it to add — for example, when you screenshot an invite and ask Akari to schedule it.";
 				INFOPLIST_KEY_NSCalendarsUsageDescription = "Akari uses your calendar to create events you ask it to add — for example, when you screenshot an invite and ask Akari to schedule it.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSLocationUsageDescription = "Akari reads your Wi-Fi network name to run join-this-network automations. It never leaves your Mac.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Akari transcribes your voice on-device (via Whisper) when you hold the talk key. The audio never leaves your Mac.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Akari reads your Wi-Fi network name to run join-this-network automations. It never leaves your Mac.";
 				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "Akari uses Reminders to create tasks you ask it to add — for example, turning a note or screenshot into a reminder.";
 				INFOPLIST_KEY_NSRemindersUsageDescription = "Akari uses Reminders to create tasks you ask it to add — for example, turning a note or screenshot into a reminder.";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -334,11 +341,12 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSAppleEventsUsageDescription = "Akari uses System Events to paste drafted replies into the chat field you have focused — for example, when you ask it to draft a message in iMessage.";
-				INFOPLIST_KEY_NSLocationUsageDescription = "Akari reads your Wi-Fi network name to run join-this-network automations. It never leaves your Mac.";
-				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Akari reads your Wi-Fi network name to run join-this-network automations. It never leaves your Mac.";
 				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "Akari uses your calendar to create events you ask it to add — for example, when you screenshot an invite and ask Akari to schedule it.";
 				INFOPLIST_KEY_NSCalendarsUsageDescription = "Akari uses your calendar to create events you ask it to add — for example, when you screenshot an invite and ask Akari to schedule it.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSLocationUsageDescription = "Akari reads your Wi-Fi network name to run join-this-network automations. It never leaves your Mac.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Akari transcribes your voice on-device (via Whisper) when you hold the talk key. The audio never leaves your Mac.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Akari reads your Wi-Fi network name to run join-this-network automations. It never leaves your Mac.";
 				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "Akari uses Reminders to create tasks you ask it to add — for example, turning a note or screenshot into a reminder.";
 				INFOPLIST_KEY_NSRemindersUsageDescription = "Akari uses Reminders to create tasks you ask it to add — for example, turning a note or screenshot into a reminder.";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -382,6 +390,14 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
+		08F15245FDEC7E02B21F863F /* XCRemoteSwiftPackageReference "WhisperKit" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/argmaxinc/WhisperKit";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.0.0;
+			};
+		};
 		0B5BD5732FDFF0BE00CA19FA /* XCRemoteSwiftPackageReference "mlx-swift-examples" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/ml-explore/mlx-swift-examples";
@@ -433,6 +449,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 0BC473FE2FAE1A1A00A52524 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */;
 			productName = MarkdownUI;
+		};
+		C1110A8DE0A6D8F83F9B0F99 /* WhisperKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 08F15245FDEC7E02B21F863F /* XCRemoteSwiftPackageReference "WhisperKit" */;
+			productName = WhisperKit;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

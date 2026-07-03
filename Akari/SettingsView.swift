@@ -7,6 +7,25 @@ extension KeyboardShortcuts.Name {
     static let triggerCapture  = Self("triggerCapture")    // full-screen (chord alt for double-tap ⌥)
     static let captureRegion   = Self("captureRegion")     // drag-to-select region
     static let demoMetaball    = Self("demoMetaball")      // TEMP — demo the pointer spit-out
+    static let pushToTalk      = Self("pushToTalk")        // HOLD to talk (voice command)
+}
+
+/// Voice settings, UserDefaults-backed (read from non-UI code without SwiftUI).
+enum VoiceSettings {
+    private static let speakKey = "voice.speakReplies"
+    static var speakReplies: Bool {
+        get { UserDefaults.standard.bool(forKey: speakKey) }
+        set { UserDefaults.standard.set(newValue, forKey: speakKey) }
+    }
+}
+
+/// "Speak replies" toggle, bound to VoiceSettings (on-device TTS, off by default).
+private struct VoiceReplyToggle: View {
+    @State private var on = VoiceSettings.speakReplies
+    var body: some View {
+        Toggle("Speak replies aloud", isOn: $on)
+            .onChange(of: on) { _, v in VoiceSettings.speakReplies = v }
+    }
 }
 
 /// The settings content (the Form), with no window/panel chrome — so it can
@@ -21,10 +40,12 @@ struct SettingsBody: View {
                 }
                 KeyboardShortcuts.Recorder("Capture screen (chord):", name: .triggerCapture)
                 KeyboardShortcuts.Recorder("Capture region (drag):", name: .captureRegion)
+                KeyboardShortcuts.Recorder("Hold to talk:", name: .pushToTalk)
+                VoiceReplyToggle()
             } header: {
                 Text("Hotkeys")
             } footer: {
-                Text("Double-tap ⌥ captures the whole screen. The region chord opens a drag-to-select overlay for a specific area.")
+                Text("Double-tap ⌥ captures the whole screen. The region chord opens a drag-to-select overlay. Hold the talk key and speak a command — it's transcribed on-device (nothing audible leaves your Mac) and run like a typed one.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -169,6 +190,9 @@ private struct PermissionsSection: View {
                  status: PermissionsService.calendars(), pane: "Privacy_Calendars", request: nil),
             Item(id: "rem", icon: "checklist", name: "Reminders",
                  status: PermissionsService.reminders(), pane: "Privacy_Reminders", request: nil),
+            Item(id: "mic", icon: "mic", name: "Microphone (voice)",
+                 status: PermissionsService.microphone(), pane: "Privacy_Microphone",
+                 request: { PermissionsService.requestMicrophone() }),
             Item(id: "loc", icon: "location", name: "Location (Wi-Fi triggers)",
                  status: PermissionsService.location(), pane: "Privacy_LocationServices",
                  request: { PermissionsService.requestLocation() }),
