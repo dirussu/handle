@@ -17,6 +17,50 @@ struct AXElement {
 @MainActor
 enum AccessibilityProbe {
 
+    /// How a press was delivered — recorded in the audit log so a click is traceable
+    /// to its mechanism (semantic AXPress vs synthetic mouse event).
+    enum PressResult {
+        case axPress            // the element performed its own AXPress action
+        case mouseClick         // synthetic click at the element's live center
+        case failed(String)
+
+        var label: String {
+            switch self {
+            case .axPress:          return "AXPress"
+            case .mouseClick:       return "synthetic click"
+            case .failed(let why):  return "failed: \(why)"
+            }
+        }
+        var succeeded: Bool { if case .failed = self { return false }; return true }
+    }
+
+    /// Press an element: prefer its semantic AXPress action (no cursor movement, no
+    /// focus games); fall back to a synthetic left-click at the LIVE frame's center
+    /// for elements that don't implement AXPress (some Electron/custom controls).
+    /// Both spaces are display top-left coords, which is CGEvent's space too.
+    static func press(_ el: AXElement) -> PressResult {
+        if let ref = el.elementRef {
+            var names: CFArray?
+            if AXUIElementCopyActionNames(ref, &names) == .success,
+               let actions = names as? [String], actions.contains(kAXPressAction as String),
+               AXUIElementPerformAction(ref, kAXPressAction as CFString) == .success {
+                return .axPress
+            }
+        }
+        let frame = liveFrame(of: el) ?? el.frame
+        guard frame.width > 0, frame.height > 0 else { return .failed("element has no frame") }
+        let pt = CGPoint(x: frame.midX, y: frame.midY)
+        let src = CGEventSource(stateID: .hidSystemState)
+        guard let down = CGEvent(mouseEventSource: src, mouseType: .leftMouseDown, mouseCursorPosition: pt, mouseButton: .left),
+              let up   = CGEvent(mouseEventSource: src, mouseType: .leftMouseUp,   mouseCursorPosition: pt, mouseButton: .left) else {
+            return .failed("could not create mouse event")
+        }
+        down.post(tap: .cghidEventTap)
+        usleep(30_000)   // realistic press duration; some apps ignore instant up
+        up.post(tap: .cghidEventTap)
+        return .mouseClick
+    }
+
     /// Enumerate interactive elements inside the given rect (display top-left coords).
     /// Targets the running app with `bundleID`; falls back to frontmost.
     static func elements(

@@ -556,6 +556,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         let userText = conversation.messages.last(where: { $0.role == .user })?.text ?? ""
         agentLog.info("runToolLoop: ENTER isInitial=\(isInitial) text=\"\(userText, privacy: .public)\"")
 
+        // 0. CLICK turn — the same select-by-index as pointing, but ACTED on:
+        // highlight → confirm card → AXPress → audit. Checked before pointing so
+        // "click the send button" presses rather than just highlights.
+        if image != nil, !isInitial, promptAsksToClick(userText) {
+            let finalText = await streamOneTurn(in: conversation, instr: pointAtToolInstruction(elements: conversation.axElements), display: false)
+            if !(await dispatchClickIfPresent(finalText, conversation: conversation)) {
+                conversation.commitAssistantMessage("I don't see that on the screen.")
+            }
+            return
+        }
+
         // 1. Pointing turn — single step, validated index-select path. Buffered
         // (display:false) so the raw point_at JSON never shows; the highlight IS the
         // answer, so we add a message only when nothing was highlighted.
@@ -877,6 +888,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 else if cmd == "__trigtest__" { self?.runTrigTest() }
                 else if cmd == "__trigapptest__" { self?.runTrigAppTest() }
                 else if cmd == "__permstest__" { await self?.runPermsTest() }
+                else if cmd.hasPrefix("__clicktest__ ") { await self?.runPointingHarness(query: String(cmd.dropFirst(14)), click: true) }
                 else if cmd.hasPrefix("__trigparse__ ") {
                     let goal = String(cmd.dropFirst(14))
                     let hit = self?.hasEventTriggerHint(goal) ?? false
@@ -1283,7 +1295,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     /// Run the full pointing pipeline against the frontmost app for `query`, no GUI
     /// needed — capture, enumerate AX, See turn with the pointing instruction; the
     /// dispatch logs the selected element + live frame (and draws the highlight).
-    private func runPointingHarness(query: String) async {
+    private func runPointingHarness(query: String, click: Bool = false) async {
         let app = NSWorkspace.shared.frontmostApplication
         let bundleID = app?.bundleIdentifier
         let cursor = NSEvent.mouseLocation
@@ -1301,6 +1313,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         let convo = Conversation(chatWithApp: app?.localizedName ?? "")
         convo.updateCurrentCapture(rect: rect, screen: screen, imagePixelSize: prepared.pixelSize, axElements: axElements)
         convo.addUserMessage(query, image: prepared.image, imagePixelSize: prepared.pixelSize)
+        if click {
+            // __clicktest__: run the click pipeline card-less (DEBUG auto-approve) so
+            // select → press is verifiable headlessly.
+            let finalText = await streamOneTurn(in: convo, instr: pointAtToolInstruction(elements: axElements), display: false)
+            if !(await dispatchClickIfPresent(finalText, conversation: convo, autoApprove: true)) {
+                agentLog.info("click: NOT HANDLED — nothing selected")
+            }
+            return
+        }
         await runToolLoop(in: convo, isInitial: false, action: convo.initialAction)
     }
 
@@ -1453,6 +1474,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         check("mapAE denied", PermissionsService.mapAEStatus(OSStatus(errAEEventNotPermitted)) == .denied)
         check("mapAE notRunning", PermissionsService.mapAEStatus(OSStatus(procNotFound)) == .unavailable("App not running"))
         check("settings url", PermissionsService.settingsURL(pane: "Privacy_Automation").absoluteString.hasSuffix("Privacy_Automation"))
+        // Click path gating (click acts; point highlights — click checked first)
+        check("asksToClick click", promptAsksToClick("click the send button"))
+        check("asksToClick press", promptAsksToClick("press the OK button"))
+        check("asksToClick tap", promptAsksToClick("tap the compose icon"))
+        check("asksToClick where→false", !promptAsksToClick("where is the send button"))
+        check("asksToClick explain→false", !promptAsksToClick("explain what's on screen"))
+        check("asksToPoint click→false now", !promptAsksToPoint("click on the send button"))
+        check("asksToPoint where still", promptAsksToPoint("where is the send button"))
         agentLog.info("selftest DONE: \(pass) pass, \(fail) fail")
     }
 
@@ -1517,11 +1546,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
     /// Does this prompt actually ask Akari to point at / locate something? Gates
     /// the (token-heavy) candidate list so it's only sent when pointing is wanted —
-    /// not on a plain "explain this screen" turn.
+    /// not on a plain "explain this screen" turn. ("click"/"press"/"tap" now route
+    /// to the CLICK path — checked before this gate.)
     private func promptAsksToPoint(_ text: String) -> Bool {
         let t = text.lowercased()
         return ["where", "point at", "point to", "show me", "find the", "locate",
-                "highlight", "which", "click on", "tap on"].contains { t.contains($0) }
+                "highlight", "which"].contains { t.contains($0) }
+    }
+
+    /// Does this prompt ask Akari to actually PRESS something on screen? Routes to
+    /// the click path: same select-by-index as pointing, then highlight → confirm
+    /// card → AXPress. Checked BEFORE promptAsksToPoint.
+    private func promptAsksToClick(_ text: String) -> Bool {
+        let t = text.lowercased()
+        return ["click", "press the", "press on", "tap ", "tap the", "push the button",
+                "hit the button"].contains { t.contains($0) }
     }
 
     /// Parse the reply for a `<tool_call>{…}</tool_call>` block; if it's a point_at,
@@ -1557,6 +1596,64 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         let screen = conversation.captureScreen ?? PointingOverlay.currentScreen()
         agentLog.info("runTurn: point_at index \(idx) → \(el.role, privacy: .public) \"\(el.label, privacy: .public)\" live(\(Int(frame.minX)),\(Int(frame.minY)),\(Int(frame.width))×\(Int(frame.height))) snapshot(\(Int(el.frame.minX)),\(Int(el.frame.minY)))")
         MetaballPointer.shared.guide(steps: [GuideStep(rect: frame, message: el.label)], on: screen)
+        return true
+    }
+
+    /// CLICK dispatch: same select-by-index as pointing, but the selection is ACTED
+    /// on — highlight the element (so the user sees exactly what will be pressed),
+    /// suspend on a confirm card, then AXPress (synthetic-click fallback), audit, chip.
+    /// Returns true iff it handled the turn (clicked, failed-with-message, or the
+    /// user declined). False = nothing selected; the caller shows "I don't see that."
+    @discardableResult
+    private func dispatchClickIfPresent(_ text: String, conversation: Conversation, autoApprove: Bool = false) async -> Bool {
+        guard let call = parseToolCall(text), call.name == "point_at",
+              let idx = Self.intArg(call.args["index"]) else {
+            agentLog.info("click: no selection parsed. reply tail=\"\(String(text.suffix(200)), privacy: .public)\"")
+            return false
+        }
+        if idx < 0 {
+            agentLog.info("click: model declined (index -1) — no element matched")
+            return false
+        }
+        guard conversation.axElements.indices.contains(idx) else {
+            agentLog.info("click: index \(idx) out of range (0..<\(conversation.axElements.count))")
+            return false
+        }
+        let el = conversation.axElements[idx]
+        let role = el.role.hasPrefix("AX") ? String(el.role.dropFirst(2)) : el.role
+        let frame = AccessibilityProbe.liveFrame(of: el) ?? el.frame
+        let screen = conversation.captureScreen ?? PointingOverlay.currentScreen()
+        agentLog.info("click: index \(idx) → \(el.role, privacy: .public) \"\(el.label, privacy: .public)\" live(\(Int(frame.minX)),\(Int(frame.minY)),\(Int(frame.width))×\(Int(frame.height)))")
+        // Show what will be clicked WHILE the card is up.
+        MetaballPointer.shared.guide(steps: [GuideStep(rect: frame, message: el.label)], on: screen)
+
+        let approved: Bool
+        if autoApprove {
+            approved = true   // DEBUG harness only (__clicktest__)
+        } else {
+            approved = await awaitConfirmation(in: conversation, title: "Click this?",
+                                               rows: [("Element", "\(role) “\(el.label)”")],
+                                               label: "click_element", destructive: false)
+            if Task.isCancelled { return true }
+        }
+        guard approved else {
+            conversation.commitAssistantMessage("Okay — I won't click it.")
+            return true
+        }
+        let result = AccessibilityProbe.press(el)
+        agentLog.info("click: press → \(result.label, privacy: .public)")
+        await AuditLog.shared.record(tool: "click_element",
+                                     argsJSON: "{\"element\": \"\(el.label)\", \"role\": \"\(role)\", \"method\": \"\(result.label)\"}",
+                                     outcome: result.succeeded ? "ok" : "error",
+                                     summary: "Click “\(el.label)”", confirmed: !autoApprove)
+        if result.succeeded {
+            conversation.addToolChip(name: "click_element", inputJSON: "{}",
+                                     content: "Clicked “\(el.label)” (\(result.label))", isError: false,
+                                     displaySummary: "Clicked “\(el.label)”")
+            conversation.commitAssistantMessage("Clicked “\(el.label)”.")
+        } else {
+            conversation.commitAssistantMessage("I found “\(el.label)” but couldn't click it (\(result.label)).")
+        }
         return true
     }
 
