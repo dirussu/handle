@@ -165,13 +165,12 @@ struct ConversationContent: View {
             HStack(alignment: .top) {
                 Spacer(minLength: 40)
                 VStack(alignment: .trailing, spacing: AkariSpacing.xs) {
-                    if let cgImage = msg.image {
-                        Image(nsImage: NSImage(cgImage: cgImage, size: .zero))
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-                            .frame(maxHeight: 72)
-                            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                    }
+                    // The captured screenshot is intentionally NOT rendered — it's ambient
+                    // context (Akari "looked"), not user-authored content, and a thumbnail on
+                    // every look-at-screen turn is clutter. The pixels still ride on
+                    // `msg.image` for the model; the "Looking…" streaming label signals the
+                    // capture happened. (All `msg.image`s are screen captures; user PDFs
+                    // attach via `pdfData` below and DO show.)
                     if msg.pdfData != nil {
                         HStack(spacing: AkariSpacing.s) {
                             Image(systemName: "doc.fill")
