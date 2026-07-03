@@ -51,11 +51,11 @@ private struct AutomationsSection: View {
             } else {
                 ForEach(automations) { a in
                     HStack(spacing: 8) {
-                        Image(systemName: "clock.arrow.circlepath")
+                        Image(systemName: a.trigger != nil ? "bolt" : "clock.arrow.circlepath")
                             .font(.system(size: 12)).foregroundStyle(.secondary).frame(width: 16)
                         VStack(alignment: .leading, spacing: 1) {
                             Text(a.name).font(.body)
-                            Text(a.schedule?.describe ?? "manual only").font(.caption).foregroundStyle(.secondary)
+                            Text(a.schedule?.describe ?? a.trigger?.describe ?? "manual only").font(.caption).foregroundStyle(.secondary)
                         }
                         Spacer()
                         Toggle("", isOn: enabledBinding(a)).labelsHidden().controlSize(.mini)
@@ -69,7 +69,7 @@ private struct AutomationsSection: View {
         } header: {
             Text("Automations")
         } footer: {
-            Text("Scheduled automations run on their own — approved once when you saved them, and recorded in Activity each time they fire. Toggle off to pause, or delete.")
+            Text("Automations run on their own — on a schedule or when a watched event happens (like a file appearing in a folder). Approved once when you saved them, recorded in Activity each time they fire. Toggle off to pause, or delete.")
                 .font(.caption).foregroundStyle(.secondary)
         }
         .onAppear { automations = AutomationStore.shared.automations }
@@ -83,6 +83,7 @@ private struct AutomationsSection: View {
                     u.enabled = on
                     AutomationStore.shared.replace(u)
                     automations = AutomationStore.shared.automations
+                    TriggerEngine.shared.refresh()   // start/stop watchers to match
                 }
             }
         )
@@ -91,6 +92,7 @@ private struct AutomationsSection: View {
     private func delete(_ a: Automation) {
         AutomationStore.shared.remove(id: a.id)
         automations = AutomationStore.shared.automations
+        TriggerEngine.shared.refresh()
     }
 }
 

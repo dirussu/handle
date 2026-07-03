@@ -8,9 +8,30 @@ struct Automation: Codable, Identifiable {
     var name: String
     var recipeId: String
     var paramsJSON: String            // the filled params, as JSON
-    var schedule: AutomationSchedule? // nil = manual-run only
+    var schedule: AutomationSchedule? // nil = no time trigger
+    var trigger: AutomationTrigger?   // nil = no event trigger (see TriggerEngine)
     var enabled: Bool = true
     var lastRunKey: String = ""       // "yyyy-MM-dd-HH-mm" — dedupe so a minute fires once
+}
+
+/// A local-EVENT trigger (Phase 6, AGENTS.md) — the reactive counterpart to
+/// `AutomationSchedule`. Flat struct (not an enum) so Codable stays synthesized and
+/// old automations.json files (no `trigger` key) keep decoding. `kind` selects which
+/// fields matter. v1 ships `fileAppears`; appLaunches/wifiConnects/etc. follow.
+struct AutomationTrigger: Codable {
+    var kind: String       // "fileAppears"
+    var folder: String?    // fileAppears: the watched folder (~-paths allowed)
+    var ext: String?       // fileAppears: extension filter, e.g. "pdf" (nil = any file)
+
+    var describe: String {
+        switch kind {
+        case "fileAppears":
+            let what = ext.map { ".\($0.trimmingCharacters(in: .init(charactersIn: "."))) file" } ?? "file"
+            return "when a \(what) appears in \(folder ?? "?")"
+        default:
+            return kind
+        }
+    }
 }
 
 /// A simple recurring time trigger: HH:MM, on the given weekdays (nil = every day).

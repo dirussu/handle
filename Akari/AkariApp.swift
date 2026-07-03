@@ -59,7 +59,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
         setupHotkey()
         setupAccessibilityPriming()
-        startScheduler()     // fire due saved automations
+        startScheduler()     // fire due saved automations (time triggers)
+        startTriggerEngine() // fire saved automations on local events (file triggers)
         #if DEBUG
         startTestHarness()   // file-watch trigger for the autonomous build/test loop
         #endif
@@ -572,6 +573,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             return
         }
 
+        // 2a-0a. EVENT TRIGGER — "when(ever) a PDF lands in Downloads, …" saves a
+        // reactive automation (approved once; fired by TriggerEngine, no card).
+        if hasFileTriggerHint(userText), await saveTriggeredAutomationIfRequested(goal: userText, in: conversation) { return }
+
         // 2a-0. SCHEDULE — if the goal is a recurring request ("every day at 8am…"),
         // save it as a scheduled automation (approved once) instead of running now.
         if hasScheduleHint(userText), await saveScheduledAutomationIfRequested(goal: userText, in: conversation) { return }
@@ -869,6 +874,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 else if cmd.hasPrefix("__plan__ ") { await self?.runPlanProbe(goal: String(cmd.dropFirst(9))) }
                 else if cmd.hasPrefix("__recipe__ ") { await self?.runRecipeProbe(goal: String(cmd.dropFirst(11))) }
                 else if cmd == "__schedtest__" { self?.runSchedTest() }
+                else if cmd == "__trigtest__" { self?.runTrigTest() }
+                else if cmd.hasPrefix("__trigparse__ ") {
+                    let goal = String(cmd.dropFirst(14))
+                    let hit = self?.hasFileTriggerHint(goal) ?? false
+                    if let (t, task) = await self?.parseFileTrigger(goal) {
+                        agentLog.info("trigparse: hint=\(hit) trigger=\"\(t.describe, privacy: .public)\" task=\"\(task, privacy: .public)\"")
+                    } else {
+                        agentLog.info("trigparse: hint=\(hit) → nil (not a file-trigger request)")
+                    }
+                }
                 else { await self?.runPointingHarness(query: cmd) }
             }
         }
@@ -1066,18 +1081,108 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     }
 
     /// Run a saved automation WITHOUT a card (standing consent granted at save time).
-    private func runAutomation(_ a: Automation) async {
+    /// `extra` carries trigger context (e.g. trigger_file = the new file's path) that
+    /// substitutes into the body AFTER the recipe's own params.
+    private func runAutomation(_ a: Automation, extra: [String: String] = [:]) async {
         guard let recipe = RecipeStore.shared.recipes.first(where: { $0.id == a.recipeId }) else {
             agentLog.error("automation \(a.name, privacy: .public): recipe \(a.recipeId, privacy: .public) missing"); return
         }
         let params = a.paramsJSON.data(using: .utf8).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
+        var body = recipe.resolve(recipe.body, with: params)
+        for (k, v) in extra { body = body.replacingOccurrences(of: "${\(k)}", with: v) }
         do {
-            _ = try AppleScriptTool.shared.runScript(recipe.resolve(recipe.body, with: params))
+            _ = try AppleScriptTool.shared.runScript(body)
             agentLog.info("automation \(a.name, privacy: .public): ran OK")
             await AuditLog.shared.record(tool: "automation:\(a.name)", argsJSON: a.paramsJSON, outcome: "ok", summary: recipe.title, confirmed: true)
         } catch {
             await AuditLog.shared.record(tool: "automation:\(a.name)", argsJSON: a.paramsJSON, outcome: "error", summary: error.localizedDescription, confirmed: true)
         }
+    }
+
+    // MARK: - Event triggers (Phase 6 — reactive automations)
+
+    /// High-precision gate for "save a FILE-EVENT automation" turns: needs a
+    /// when/whenever framing AND file-ish vocabulary. (Precision over recall — a miss
+    /// falls through to recipes/action-loop, which is harmless.)
+    private func hasFileTriggerHint(_ goal: String) -> Bool {
+        let t = goal.lowercased()
+        guard ["when ", "whenever ", "any time ", "anytime "].contains(where: { t.contains($0) }) else { return false }
+        return ["file", "pdf", "screenshot", "image", "png", "download", "appears in",
+                "added to", "lands in", "saved to", "dropped in"].contains { t.contains($0) }
+    }
+
+    /// NL → {folder, ext, task} via the local model (the same split-the-request
+    /// pattern as parseSchedule). Returns nil when it isn't a file-trigger request.
+    private func parseFileTrigger(_ goal: String) async -> (trigger: AutomationTrigger, task: String)? {
+        let reply = await askModel("""
+        The user said: "\(goal)"
+
+        If this asks to run a task WHENEVER A FILE APPEARS in a folder, reply with ONLY this JSON:
+        {"folder": "<the folder, e.g. ~/Downloads or ~/Desktop>", "ext": <"pdf"/"png"/etc or null for any file>, "task": "<the action to run, with the trigger words removed>"}
+        (screenshots land on ~/Desktop; downloads in ~/Downloads.)
+        If it is NOT a file-trigger request, reply with ONLY: none
+        """)
+        for json in jsonObjectCandidates(in: reply) {
+            guard let d = json.data(using: .utf8), let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+                  let task = o["task"] as? String, !task.isEmpty,
+                  let folder = o["folder"] as? String, !folder.isEmpty else { continue }
+            let ext = (o["ext"] as? String).flatMap { $0.isEmpty || $0 == "null" ? nil : $0 }
+            return (AutomationTrigger(kind: "fileAppears", folder: folder, ext: ext), task)
+        }
+        return nil
+    }
+
+    /// SAVE-AND-WATCH flow: parse the trigger, match+fill a recipe for the task,
+    /// confirm ONCE (standing consent), persist, and start watching. Mirrors
+    /// saveScheduledAutomationIfRequested. Returns true if it handled the turn.
+    private func saveTriggeredAutomationIfRequested(goal: String, in conversation: Conversation) async -> Bool {
+        guard let (trigger, task) = await parseFileTrigger(goal) else { return false }
+        guard let recipe = await matchRecipe(goal: task) else {
+            conversation.commitAssistantMessage("I can react to files appearing, but I don't have a recipe for “\(task)” yet."); return true
+        }
+        let params = await fillParams(recipe: recipe, goal: task)
+        let paramsJSON = (try? JSONSerialization.data(withJSONObject: params)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+        let approved = await awaitConfirmation(in: conversation, title: "Save automation?",
+            rows: [("When", trigger.describe),
+                   ("Does", recipe.resolve(recipe.confirmTemplate, with: params)),
+                   ("Script", recipe.resolve(recipe.body, with: params))],
+            label: "save-automation")
+        if Task.isCancelled { return true }
+        guard approved else { conversation.commitAssistantMessage("Okay, I didn't save it."); return true }
+        AutomationStore.shared.add(Automation(id: UUID().uuidString, name: recipe.title, recipeId: recipe.id,
+                                              paramsJSON: paramsJSON, trigger: trigger))
+        TriggerEngine.shared.refresh()
+        conversation.addToolChip(name: "run_applescript", inputJSON: "{}",
+                                 content: "Watching: \(trigger.describe)", isError: false, displaySummary: "Automation saved")
+        conversation.commitAssistantMessage("Saved — I'll \(recipe.title.lowercased()) \(trigger.describe).")
+        return true
+    }
+
+    /// Wire the TriggerEngine to the automation runner and start watching. The engine
+    /// is event-driven (no polling); refresh() reconciles watchers with the store.
+    private func startTriggerEngine() {
+        TriggerEngine.shared.onFire = { [weak self] automation, extra in
+            Task { @MainActor in
+                await self?.runAutomation(automation, extra: extra)
+                if !NotchController.shared.isPanelOpen {
+                    NotificationsService.shared.notifyTaskComplete(body: "Ran automation: \(automation.name)")
+                }
+            }
+        }
+        TriggerEngine.shared.refresh()
+    }
+
+    /// TRIGGER TEST (`__trigtest__`): watch /tmp/akari_trigger_test for new .png files
+    /// and set volume to 25 when one appears — validates the reactive path end to end
+    /// (watcher → engine match → runAutomation, no card, audited).
+    private func runTrigTest() {
+        let dir = "/tmp/akari_trigger_test"
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        AutomationStore.shared.add(Automation(id: "trigtest", name: "trigger test", recipeId: "set-volume",
+                                              paramsJSON: "{\"level\": 25}",
+                                              trigger: AutomationTrigger(kind: "fileAppears", folder: dir, ext: "png")))
+        TriggerEngine.shared.refresh()
+        agentLog.info("trigtest: watching \(dir, privacy: .public) for .png — drop a file to fire")
     }
 
     /// Once-a-tick scheduler: run any enabled automation whose time is due (deduped per
@@ -1252,6 +1357,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         let sdefXML = "<class name=\"window\">\n<property name=\"index\" type=\"integer\"/>\n</class>\n<command name=\"close\"/>"
         check("sdef condense class", AppleScriptDictionary.condense(sdefXML, appName: "T").contains("class window: index (integer)"))
         check("sdef condense commands", AppleScriptDictionary.condense(sdefXML, appName: "T").contains("commands: close"))
+        // Event triggers (Phase 6)
+        check("trigHint when+pdf", hasFileTriggerHint("when a pdf lands in downloads, open it"))
+        check("trigHint whenever+screenshot", hasFileTriggerHint("whenever I take a screenshot, move it"))
+        check("trigHint no-when→false", !hasFileTriggerHint("open the pdf in downloads"))
+        check("trigHint when-no-file→false", !hasFileTriggerHint("when I say go, set the volume to 20"))
+        check("trigger describe ext", AutomationTrigger(kind: "fileAppears", folder: "~/Downloads", ext: "pdf").describe == "when a .pdf file appears in ~/Downloads")
+        check("trigger describe any", AutomationTrigger(kind: "fileAppears", folder: "~/Desktop", ext: nil).describe == "when a file appears in ~/Desktop")
+        check("watcher diff new", FolderWatcher.newEntries(known: ["a.pdf"], now: ["a.pdf", "b.pdf", ".DS_Store"]) == ["b.pdf"])
+        check("watcher diff none", FolderWatcher.newEntries(known: ["a.pdf"], now: ["a.pdf"]).isEmpty)
+        check("trigger ext match", TriggerEngine.matches(ext: "pdf", filename: "report.PDF"))
+        check("trigger ext reject", !TriggerEngine.matches(ext: "pdf", filename: "photo.png"))
+        check("trigger ext any", TriggerEngine.matches(ext: nil, filename: "anything.zip"))
+        check("trigger expand ~", TriggerEngine.expand("~/Downloads").hasPrefix("/"))
         agentLog.info("selftest DONE: \(pass) pass, \(fail) fail")
     }
 
