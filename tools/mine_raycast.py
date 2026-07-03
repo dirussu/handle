@@ -94,7 +94,7 @@ def param_type(argspec):
             return "oneOf(" + ",".join(vals) + ")", placeholder
     return "string", placeholder
 
-def convert(text, stem):
+def convert(text, stem, source=""):
     """Return (recipe_md, param_names) or (None, reason)."""
     meta, args = parse_headers(text)
     title = meta.get("title")
@@ -154,6 +154,7 @@ def convert(text, stem):
     kws = keywords_for(meta, title)
     desc = meta.get("description", title).replace("\n"," ").strip()
     out = ["---", f"id: {stem}", f"title: {title}"]
+    if source: out.append(f"source: {source}")   # provenance; RecipeFile.parse ignores unknown keys
     if desc: out.append(f"description: {desc}")
     if kws:  out.append("keywords: " + ", ".join(kws))
     out.append(f"confirm: {title}")
@@ -185,7 +186,7 @@ def main():
             seen[stem] += 1; stem = f"{stem}-{seen[stem]}"
         else:
             seen[stem] = 1
-        md, info = convert(text, stem)
+        md, info = convert(text, stem, source=os.path.relpath(path, repo))
         if md is None:
             skipped.append((os.path.relpath(path, repo), info)); continue
         open(os.path.join(outdir, stem+".md"), "w", encoding="utf-8").write(md)
