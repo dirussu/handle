@@ -575,7 +575,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
         // 2a-0a. EVENT TRIGGER — "when(ever) a PDF lands in Downloads, …" saves a
         // reactive automation (approved once; fired by TriggerEngine, no card).
-        if hasFileTriggerHint(userText), await saveTriggeredAutomationIfRequested(goal: userText, in: conversation) { return }
+        if hasEventTriggerHint(userText), await saveTriggeredAutomationIfRequested(goal: userText, in: conversation) { return }
 
         // 2a-0. SCHEDULE — if the goal is a recurring request ("every day at 8am…"),
         // save it as a scheduled automation (approved once) instead of running now.
@@ -875,13 +875,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 else if cmd.hasPrefix("__recipe__ ") { await self?.runRecipeProbe(goal: String(cmd.dropFirst(11))) }
                 else if cmd == "__schedtest__" { self?.runSchedTest() }
                 else if cmd == "__trigtest__" { self?.runTrigTest() }
+                else if cmd == "__trigapptest__" { self?.runTrigAppTest() }
                 else if cmd.hasPrefix("__trigparse__ ") {
                     let goal = String(cmd.dropFirst(14))
-                    let hit = self?.hasFileTriggerHint(goal) ?? false
-                    if let (t, task) = await self?.parseFileTrigger(goal) {
+                    let hit = self?.hasEventTriggerHint(goal) ?? false
+                    if let (t, task) = await self?.parseEventTrigger(goal) {
                         agentLog.info("trigparse: hint=\(hit) trigger=\"\(t.describe, privacy: .public)\" task=\"\(task, privacy: .public)\"")
                     } else {
-                        agentLog.info("trigparse: hint=\(hit) → nil (not a file-trigger request)")
+                        agentLog.info("trigparse: hint=\(hit) → nil (not an event-trigger request)")
                     }
                 }
                 else { await self?.runPointingHarness(query: cmd) }
@@ -1101,33 +1102,52 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
     // MARK: - Event triggers (Phase 6 — reactive automations)
 
-    /// High-precision gate for "save a FILE-EVENT automation" turns: needs a
-    /// when/whenever framing AND file-ish vocabulary. (Precision over recall — a miss
-    /// falls through to recipes/action-loop, which is harmless.)
-    private func hasFileTriggerHint(_ goal: String) -> Bool {
+    /// High-precision gate for "save an EVENT automation" turns: needs a
+    /// when/whenever framing AND event vocabulary (file / app-open / Wi-Fi).
+    /// (Precision over recall — a miss falls through to recipes/action-loop.)
+    private func hasEventTriggerHint(_ goal: String) -> Bool {
         let t = goal.lowercased()
         guard ["when ", "whenever ", "any time ", "anytime "].contains(where: { t.contains($0) }) else { return false }
         return ["file", "pdf", "screenshot", "image", "png", "download", "appears in",
-                "added to", "lands in", "saved to", "dropped in"].contains { t.contains($0) }
+                "added to", "lands in", "saved to", "dropped in",
+                "open", "launch", "start", "quit",
+                "wifi", "wi-fi", "network", "connect", "join"].contains { t.contains($0) }
     }
 
-    /// NL → {folder, ext, task} via the local model (the same split-the-request
-    /// pattern as parseSchedule). Returns nil when it isn't a file-trigger request.
-    private func parseFileTrigger(_ goal: String) async -> (trigger: AutomationTrigger, task: String)? {
+    /// NL → {kind-specific trigger, task} via the local model (the same
+    /// split-the-request pattern as parseSchedule). Nil = not an event-trigger request.
+    private func parseEventTrigger(_ goal: String) async -> (trigger: AutomationTrigger, task: String)? {
         let reply = await askModel("""
         The user said: "\(goal)"
 
-        If this asks to run a task WHENEVER A FILE APPEARS in a folder, reply with ONLY this JSON:
-        {"folder": "<the folder, e.g. ~/Downloads or ~/Desktop>", "ext": <"pdf"/"png"/etc or null for any file>, "task": "<the action to run, with the trigger words removed>"}
-        (screenshots land on ~/Desktop; downloads in ~/Downloads.)
-        If it is NOT a file-trigger request, reply with ONLY: none
+        If this asks to run a task WHENEVER AN EVENT happens (phrased like "when X happens, do Y"),
+        reply with ONLY ONE of these JSON shapes. The event is the "when…" part; "task" is the do-Y part:
+        - event: a file appears in a folder → {"kind": "fileAppears", "folder": "<e.g. ~/Downloads or ~/Desktop>", "ext": <"pdf"/"png"/etc or null for any file>, "task": "<the do-Y action>"}
+          (screenshots land on ~/Desktop; downloads in ~/Downloads.)
+        - event: the user opens/launches/starts an app → {"kind": "appLaunches", "app": "<that app's name>", "task": "<the do-Y action>"}
+          (example: "when I open Mail, do Y" → {"kind": "appLaunches", "app": "Mail", "task": "do Y"})
+        - event: joining a Wi-Fi network → {"kind": "wifiConnects", "ssid": <"the network name" or null for any network>, "task": "<the do-Y action>"}
+        If it is NOT a when-X-do-Y request, reply with ONLY: none
         """)
         for json in jsonObjectCandidates(in: reply) {
             guard let d = json.data(using: .utf8), let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
                   let task = o["task"] as? String, !task.isEmpty,
-                  let folder = o["folder"] as? String, !folder.isEmpty else { continue }
-            let ext = (o["ext"] as? String).flatMap { $0.isEmpty || $0 == "null" ? nil : $0 }
-            return (AutomationTrigger(kind: "fileAppears", folder: folder, ext: ext), task)
+                  let kind = o["kind"] as? String else { continue }
+            func str(_ k: String) -> String? {
+                (o[k] as? String).flatMap { $0.isEmpty || $0 == "null" ? nil : $0 }
+            }
+            switch kind {
+            case "fileAppears":
+                guard let folder = str("folder") else { continue }
+                return (AutomationTrigger(kind: kind, folder: folder, ext: str("ext")), task)
+            case "appLaunches":
+                guard let app = str("app") else { continue }
+                return (AutomationTrigger(kind: kind, app: app), task)
+            case "wifiConnects":
+                return (AutomationTrigger(kind: kind, ssid: str("ssid")), task)
+            default:
+                continue
+            }
         }
         return nil
     }
@@ -1136,9 +1156,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     /// confirm ONCE (standing consent), persist, and start watching. Mirrors
     /// saveScheduledAutomationIfRequested. Returns true if it handled the turn.
     private func saveTriggeredAutomationIfRequested(goal: String, in conversation: Conversation) async -> Bool {
-        guard let (trigger, task) = await parseFileTrigger(goal) else { return false }
+        guard let (trigger, task) = await parseEventTrigger(goal) else { return false }
         guard let recipe = await matchRecipe(goal: task) else {
-            conversation.commitAssistantMessage("I can react to files appearing, but I don't have a recipe for “\(task)” yet."); return true
+            conversation.commitAssistantMessage("I can react \(trigger.describe), but I don't have a recipe for “\(task)” yet."); return true
         }
         let params = await fillParams(recipe: recipe, goal: task)
         let paramsJSON = (try? JSONSerialization.data(withJSONObject: params)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
@@ -1170,6 +1190,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             }
         }
         TriggerEngine.shared.refresh()
+    }
+
+    /// APP-LAUNCH TRIGGER TEST (`__trigapptest__`): set volume to 35 whenever
+    /// Calculator launches — validates NSWorkspace source → match → fire.
+    private func runTrigAppTest() {
+        AutomationStore.shared.add(Automation(id: "trigapptest", name: "app-launch test", recipeId: "set-volume",
+                                              paramsJSON: "{\"level\": 35}",
+                                              trigger: AutomationTrigger(kind: "appLaunches", app: "Calculator")))
+        TriggerEngine.shared.refresh()
+        agentLog.info("trigapptest: watching for Calculator launch — open it to fire")
     }
 
     /// TRIGGER TEST (`__trigtest__`): watch /tmp/akari_trigger_test for new .png files
@@ -1358,10 +1388,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         check("sdef condense class", AppleScriptDictionary.condense(sdefXML, appName: "T").contains("class window: index (integer)"))
         check("sdef condense commands", AppleScriptDictionary.condense(sdefXML, appName: "T").contains("commands: close"))
         // Event triggers (Phase 6)
-        check("trigHint when+pdf", hasFileTriggerHint("when a pdf lands in downloads, open it"))
-        check("trigHint whenever+screenshot", hasFileTriggerHint("whenever I take a screenshot, move it"))
-        check("trigHint no-when→false", !hasFileTriggerHint("open the pdf in downloads"))
-        check("trigHint when-no-file→false", !hasFileTriggerHint("when I say go, set the volume to 20"))
+        check("trigHint when+pdf", hasEventTriggerHint("when a pdf lands in downloads, open it"))
+        check("trigHint whenever+screenshot", hasEventTriggerHint("whenever I take a screenshot, move it"))
+        check("trigHint no-when→false", !hasEventTriggerHint("open the pdf in downloads"))
+        check("trigHint when-no-file→false", !hasEventTriggerHint("when I say go, set the volume to 20"))
         check("trigger describe ext", AutomationTrigger(kind: "fileAppears", folder: "~/Downloads", ext: "pdf").describe == "when a .pdf file appears in ~/Downloads")
         check("trigger describe any", AutomationTrigger(kind: "fileAppears", folder: "~/Desktop", ext: nil).describe == "when a file appears in ~/Desktop")
         check("watcher diff new", FolderWatcher.newEntries(known: ["a.pdf"], now: ["a.pdf", "b.pdf", ".DS_Store"]) == ["b.pdf"])
@@ -1370,6 +1400,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         check("trigger ext reject", !TriggerEngine.matches(ext: "pdf", filename: "photo.png"))
         check("trigger ext any", TriggerEngine.matches(ext: nil, filename: "anything.zip"))
         check("trigger expand ~", TriggerEngine.expand("~/Downloads").hasPrefix("/"))
+        check("trigHint when+open-app", hasEventTriggerHint("when I open zoom, set the volume to 30"))
+        check("trigHint when+wifi", hasEventTriggerHint("whenever I join my home wifi, open downloads"))
+        check("app match name", TriggerEngine.appMatches(want: "zoom", name: "zoom.us", bundleID: "us.zoom.xos"))
+        check("app match bundle", TriggerEngine.appMatches(want: "Calculator", name: nil, bundleID: "com.apple.calculator"))
+        check("app reject", !TriggerEngine.appMatches(want: "zoom", name: "Safari", bundleID: "com.apple.Safari"))
+        check("app nil-want reject", !TriggerEngine.appMatches(want: nil, name: "Safari", bundleID: nil))
+        check("ssid any", TriggerEngine.ssidMatches(want: nil, got: "Anything"))
+        check("ssid exact ci", TriggerEngine.ssidMatches(want: "HomeNet 5G", got: "homenet5g"))
+        check("ssid reject", !TriggerEngine.ssidMatches(want: "HomeNet", got: "CafeWifi"))
+        check("ssid want-no-got reject", !TriggerEngine.ssidMatches(want: "HomeNet", got: nil))
+        check("trigger describe app", AutomationTrigger(kind: "appLaunches", app: "Zoom").describe == "when Zoom opens")
+        check("trigger describe wifi any", AutomationTrigger(kind: "wifiConnects").describe == "when Wi-Fi connects")
         agentLog.info("selftest DONE: \(pass) pass, \(fail) fail")
     }
 

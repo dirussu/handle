@@ -1,7 +1,38 @@
 import Foundation
+import AppKit
+import CoreWLAN
 import os.log
 
 private let trigLog = Logger(subsystem: "com.dimarussu.Akari", category: "Agent")
+
+/// Wi-Fi association watcher — event-driven via CWWiFiClient's ssidDidChange event.
+/// NOTE: reading the SSID string requires Location permission on modern macOS; without
+/// it `ssid()` returns nil, so named-network triggers can't match (any-network triggers
+/// still fire). Surfacing that permission is onboarding work (task #16).
+final class WifiWatcher: NSObject, CWEventDelegate {
+    private let onChange: (String?) -> Void
+    private let client = CWWiFiClient.shared()
+
+    init?(onChange: @escaping (String?) -> Void) {
+        self.onChange = onChange
+        super.init()
+        client.delegate = self
+        do { try client.startMonitoringEvent(with: .ssidDidChange) } catch {
+            trigLog.error("triggers: wifi monitoring failed: \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
+    }
+
+    func ssidDidChangeForWiFiInterface(withName interfaceName: String) {
+        let ssid = client.interface(withName: interfaceName)?.ssid()
+        onChange(ssid)
+    }
+
+    deinit {
+        try? client.stopMonitoringAllEvents()
+        client.delegate = nil
+    }
+}
 
 /// Watches ONE folder for NEW files — event-driven (kqueue via DispatchSource on the
 /// directory fd; the directory "writes" when an entry is added/removed), no polling.
@@ -66,7 +97,10 @@ final class TriggerEngine {
     var onFire: ((Automation, [String: String]) -> Void)?
 
     private var watchers: [String: FolderWatcher] = [:]   // expanded folder → watcher
-    private var recentFires: Set<String> = []             // "autoID|file" dedupe
+    private var recentFires: Set<String> = []             // "autoID|file" / "autoID|pid" dedupe
+    private var appLaunchObserver: NSObjectProtocol?
+    private var wifiWatcher: WifiWatcher?
+    private var lastSSID: String?
 
     static func expand(_ p: String) -> String { (p as NSString).expandingTildeInPath }
 
@@ -77,11 +111,42 @@ final class TriggerEngine {
         return (filename as NSString).pathExtension.lowercased() == want
     }
 
-    /// Reconcile watchers with the enabled fileAppears automations in the store.
+    /// Does a launched app (name and/or bundle id) match the trigger's `app`?
+    /// Normalized contains-either-way, so "zoom" matches "zoom.us" and "us.zoom.xos".
+    static func appMatches(want: String?, name: String?, bundleID: String?) -> Bool {
+        guard let want, !want.isEmpty else { return false }
+        let w = normalized(want)
+        guard !w.isEmpty else { return false }
+        for candidate in [name, bundleID].compactMap({ $0 }) {
+            let c = normalized(candidate)
+            if !c.isEmpty, c.contains(w) || w.contains(c) { return true }
+        }
+        return false
+    }
+
+    /// Does a joined network match the trigger's `ssid`? nil = any network.
+    static func ssidMatches(want: String?, got: String?) -> Bool {
+        guard let want, !want.isEmpty else { return true }
+        guard let got else { return false }
+        return normalized(want) == normalized(got)
+    }
+
+    private static func normalized(_ s: String) -> String {
+        s.lowercased().filter { $0.isLetter || $0.isNumber }
+    }
+
+    private var enabledTriggers: [Automation] {
+        AutomationStore.shared.automations.filter { $0.enabled && $0.trigger != nil }
+    }
+
+    /// Reconcile event sources with the enabled triggered automations in the store.
     /// Called at launch, after saving a triggered automation, and after toggles/deletes.
+    /// Each source runs only while at least one automation needs it.
     func refresh() {
-        let wanted = Set(AutomationStore.shared.automations
-            .filter { $0.enabled && $0.trigger?.kind == "fileAppears" }
+        let triggers = enabledTriggers
+
+        // fileAppears → one FolderWatcher per unique folder
+        let wanted = Set(triggers.filter { $0.trigger?.kind == "fileAppears" }
             .compactMap { $0.trigger?.folder.map(Self.expand) })
         for gone in Set(watchers.keys).subtracting(wanted) { watchers[gone] = nil }
         for folder in wanted where watchers[folder] == nil {
@@ -89,6 +154,34 @@ final class TriggerEngine {
                 Task { @MainActor in self?.handleNewFiles(files, in: folder) }
             }
             trigLog.info("triggers: \(self.watchers[folder] == nil ? "FAILED to watch" : "watching", privacy: .public) \(folder, privacy: .public)")
+        }
+
+        // appLaunches → one NSWorkspace observer while any exist
+        let needsAppSource = triggers.contains { $0.trigger?.kind == "appLaunches" }
+        if needsAppSource, appLaunchObserver == nil {
+            appLaunchObserver = NSWorkspace.shared.notificationCenter.addObserver(
+                forName: NSWorkspace.didLaunchApplicationNotification, object: nil, queue: .main
+            ) { [weak self] note in
+                let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+                let name = app?.localizedName, bundle = app?.bundleIdentifier, pid = app?.processIdentifier ?? -1
+                Task { @MainActor in self?.handleAppLaunch(name: name, bundleID: bundle, pid: pid) }
+            }
+            trigLog.info("triggers: watching app launches")
+        } else if !needsAppSource, let obs = appLaunchObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(obs)
+            appLaunchObserver = nil
+        }
+
+        // wifiConnects → one CoreWLAN watcher while any exist
+        let needsWifi = triggers.contains { $0.trigger?.kind == "wifiConnects" }
+        if needsWifi, wifiWatcher == nil {
+            lastSSID = CWWiFiClient.shared().interface()?.ssid()
+            wifiWatcher = WifiWatcher { [weak self] ssid in
+                Task { @MainActor in self?.handleWifiChange(ssid: ssid) }
+            }
+            trigLog.info("triggers: \(self.wifiWatcher == nil ? "FAILED to watch" : "watching", privacy: .public) Wi-Fi (ssid readable: \(self.lastSSID != nil))")
+        } else if !needsWifi {
+            wifiWatcher = nil
         }
     }
 
@@ -104,6 +197,33 @@ final class TriggerEngine {
                 trigLog.info("triggers: firing \"\(a.name, privacy: .public)\" — new file \(file, privacy: .public)")
                 onFire?(a, ["trigger_file": (folder as NSString).appendingPathComponent(file)])
             }
+        }
+    }
+
+    private func handleAppLaunch(name: String?, bundleID: String?, pid: Int32) {
+        for a in AutomationStore.shared.automations {
+            guard a.enabled, let t = a.trigger, t.kind == "appLaunches",
+                  Self.appMatches(want: t.app, name: name, bundleID: bundleID) else { continue }
+            let key = "\(a.id)|pid\(pid)"       // a RE-launch (new pid) fires again
+            guard !recentFires.contains(key) else { continue }
+            recentFires.insert(key)
+            trigLog.info("triggers: firing \"\(a.name, privacy: .public)\" — \(name ?? bundleID ?? "app", privacy: .public) launched")
+            onFire?(a, ["trigger_app": name ?? bundleID ?? ""])
+        }
+    }
+
+    private func handleWifiChange(ssid: String?) {
+        guard ssid != lastSSID else { return }   // association events repeat; fire on change
+        lastSSID = ssid
+        guard ssid != nil || AutomationStore.shared.automations.contains(where: { $0.trigger?.kind == "wifiConnects" && $0.trigger?.ssid == nil }) else { return }
+        for a in AutomationStore.shared.automations {
+            guard a.enabled, let t = a.trigger, t.kind == "wifiConnects",
+                  Self.ssidMatches(want: t.ssid, got: ssid) else { continue }
+            // nil ssid means "left a network / unreadable" — only any-network triggers
+            // with a real join should fire; skip the disconnect edge entirely.
+            guard ssid != nil else { continue }
+            trigLog.info("triggers: firing \"\(a.name, privacy: .public)\" — Wi-Fi changed")
+            onFire?(a, ["trigger_ssid": ssid ?? ""])
         }
     }
 }

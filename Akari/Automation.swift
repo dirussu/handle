@@ -17,17 +17,23 @@ struct Automation: Codable, Identifiable {
 /// A local-EVENT trigger (Phase 6, AGENTS.md) — the reactive counterpart to
 /// `AutomationSchedule`. Flat struct (not an enum) so Codable stays synthesized and
 /// old automations.json files (no `trigger` key) keep decoding. `kind` selects which
-/// fields matter. v1 ships `fileAppears`; appLaunches/wifiConnects/etc. follow.
+/// fields matter: fileAppears | appLaunches | wifiConnects.
 struct AutomationTrigger: Codable {
-    var kind: String       // "fileAppears"
+    var kind: String       // "fileAppears" | "appLaunches" | "wifiConnects"
     var folder: String?    // fileAppears: the watched folder (~-paths allowed)
     var ext: String?       // fileAppears: extension filter, e.g. "pdf" (nil = any file)
+    var app: String?       // appLaunches: app name or bundle id, e.g. "zoom.us"
+    var ssid: String?      // wifiConnects: network name (nil = any Wi-Fi join)
 
     var describe: String {
         switch kind {
         case "fileAppears":
             let what = ext.map { ".\($0.trimmingCharacters(in: .init(charactersIn: "."))) file" } ?? "file"
             return "when a \(what) appears in \(folder ?? "?")"
+        case "appLaunches":
+            return "when \(app ?? "?") opens"
+        case "wifiConnects":
+            return ssid.map { "when Wi-Fi joins “\($0)”" } ?? "when Wi-Fi connects"
         default:
             return kind
         }

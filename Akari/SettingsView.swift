@@ -46,7 +46,7 @@ private struct AutomationsSection: View {
     var body: some View {
         Section {
             if automations.isEmpty {
-                Text("No saved automations yet. Ask Akari to schedule one — e.g. \"set my volume to 20 every day at 6pm\".")
+                Text("No saved automations yet. Ask Akari for one — e.g. \"set my volume to 20 every day at 6pm\" or \"when I open Zoom, set the volume to 30\".")
                     .font(.caption).foregroundStyle(.secondary)
             } else {
                 ForEach(automations) { a in
