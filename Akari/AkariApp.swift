@@ -876,6 +876,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 else if cmd == "__schedtest__" { self?.runSchedTest() }
                 else if cmd == "__trigtest__" { self?.runTrigTest() }
                 else if cmd == "__trigapptest__" { self?.runTrigAppTest() }
+                else if cmd == "__permstest__" { await self?.runPermsTest() }
                 else if cmd.hasPrefix("__trigparse__ ") {
                     let goal = String(cmd.dropFirst(14))
                     let hit = self?.hasEventTriggerHint(goal) ?? false
@@ -1075,9 +1076,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         guard approved else { conversation.commitAssistantMessage("Okay, I didn't save it."); return true }
         AutomationStore.shared.add(Automation(id: UUID().uuidString, name: recipe.title, recipeId: recipe.id,
                                               paramsJSON: paramsJSON, schedule: schedule))
+        // Stage TCC now, while the user is present — a scheduled fire can't answer dialogs.
+        let unprimed = PermissionsService.primeAutomationTargets(inScript: recipe.resolve(recipe.body, with: params))
         conversation.addToolChip(name: "run_applescript", inputJSON: "{}",
                                  content: "Scheduled \(schedule.describe)", isError: false, displaySummary: "Automation saved")
-        conversation.commitAssistantMessage("Saved — I'll \(recipe.title.lowercased()) \(schedule.describe).")
+        var msg = "Saved — I'll \(recipe.title.lowercased()) \(schedule.describe)."
+        if !unprimed.isEmpty {
+            msg += " The first run may ask permission to control \(unprimed.joined(separator: ", "))."
+        }
+        conversation.commitAssistantMessage(msg)
         return true
     }
 
@@ -1172,9 +1179,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         AutomationStore.shared.add(Automation(id: UUID().uuidString, name: recipe.title, recipeId: recipe.id,
                                               paramsJSON: paramsJSON, trigger: trigger))
         TriggerEngine.shared.refresh()
+        // Stage TCC now, while the user is present — a triggered fire can't answer dialogs.
+        let unprimed = PermissionsService.primeAutomationTargets(inScript: recipe.resolve(recipe.body, with: params))
+        if trigger.kind == "wifiConnects", trigger.ssid != nil, PermissionsService.location() == .notDetermined {
+            PermissionsService.requestLocation()   // reading the SSID needs Location on macOS
+        }
         conversation.addToolChip(name: "run_applescript", inputJSON: "{}",
                                  content: "Watching: \(trigger.describe)", isError: false, displaySummary: "Automation saved")
-        conversation.commitAssistantMessage("Saved — I'll \(recipe.title.lowercased()) \(trigger.describe).")
+        var msg = "Saved — I'll \(recipe.title.lowercased()) \(trigger.describe)."
+        if !unprimed.isEmpty {
+            msg += " The first run may ask permission to control \(unprimed.joined(separator: ", "))."
+        }
+        conversation.commitAssistantMessage(msg)
         return true
     }
 
@@ -1190,6 +1206,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             }
         }
         TriggerEngine.shared.refresh()
+    }
+
+    /// PERMISSIONS TEST (`__permstest__`): log every TCC status non-interactively
+    /// (Automation checked against Finder + System Events, no dialogs).
+    private func runPermsTest() async {
+        agentLog.info("perms: accessibility=\(PermissionsService.accessibility().label, privacy: .public)")
+        agentLog.info("perms: screenRecording=\(PermissionsService.screenRecording().label, privacy: .public)")
+        agentLog.info("perms: calendars=\(PermissionsService.calendars().label, privacy: .public)")
+        agentLog.info("perms: reminders=\(PermissionsService.reminders().label, privacy: .public)")
+        agentLog.info("perms: location=\(PermissionsService.location().label, privacy: .public)")
+        let n = await PermissionsService.notifications()
+        agentLog.info("perms: notifications=\(n.label, privacy: .public)")
+        for app in ["Finder", "System Events"] {
+            agentLog.info("perms: automation(\(app, privacy: .public))=\(PermissionsService.automationStatus(for: app).label, privacy: .public)")
+        }
+        agentLog.info("perms: DONE")
     }
 
     /// APP-LAUNCH TRIGGER TEST (`__trigapptest__`): set volume to 35 whenever
@@ -1412,6 +1444,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         check("ssid want-no-got reject", !TriggerEngine.ssidMatches(want: "HomeNet", got: nil))
         check("trigger describe app", AutomationTrigger(kind: "appLaunches", app: "Zoom").describe == "when Zoom opens")
         check("trigger describe wifi any", AutomationTrigger(kind: "wifiConnects").describe == "when Wi-Fi connects")
+        // Permissions (TCC) helpers
+        check("tellTargets multi+dedupe", PermissionsService.tellTargets(in:
+            "tell application \"Music\" to play\ntell application \"Finder\" to activate\ntell application \"music\" to pause") == ["Music", "Finder"])
+        check("tellTargets id form", PermissionsService.tellTargets(in: "tell application id \"com.apple.Music\" to play") == ["com.apple.Music"])
+        check("tellTargets none", PermissionsService.tellTargets(in: "set volume output volume 20").isEmpty)
+        check("mapAE granted", PermissionsService.mapAEStatus(noErr) == .granted)
+        check("mapAE denied", PermissionsService.mapAEStatus(OSStatus(errAEEventNotPermitted)) == .denied)
+        check("mapAE notRunning", PermissionsService.mapAEStatus(OSStatus(procNotFound)) == .unavailable("App not running"))
+        check("settings url", PermissionsService.settingsURL(pane: "Privacy_Automation").absoluteString.hasSuffix("Privacy_Automation"))
         agentLog.info("selftest DONE: \(pass) pass, \(fail) fail")
     }
 

@@ -31,6 +31,7 @@ struct SettingsBody: View {
 
             WorkspaceSection()
             AutomationsSection()
+            PermissionsSection()
             ActivitySection()
             PowerUserSection()
         }
@@ -93,6 +94,101 @@ private struct AutomationsSection: View {
         AutomationStore.shared.remove(id: a.id)
         automations = AutomationStore.shared.automations
         TriggerEngine.shared.refresh()
+    }
+}
+
+/// Every TCC permission Akari depends on, with live status — plus per-app Automation
+/// consent for the apps saved automations control. The staging half lives in the save
+/// flows (PermissionsService.primeAutomationTargets); this is the visible half.
+private struct PermissionsSection: View {
+    struct Item: Identifiable {
+        let id: String
+        let icon: String
+        let name: String
+        let status: PermissionsService.Status
+        let pane: String?               // Privacy & Security pane query, if any
+        let request: (() -> Void)?      // in-app ask, when the OS still allows one
+    }
+    @State private var items: [Item] = []
+
+    var body: some View {
+        Section {
+            ForEach(items) { p in
+                HStack(spacing: 8) {
+                    Image(systemName: p.icon)
+                        .font(.system(size: 12)).foregroundStyle(.secondary).frame(width: 16)
+                    Text(p.name).font(.body)
+                    Spacer()
+                    Circle().fill(color(p.status)).frame(width: 7, height: 7)
+                    Text(p.status.label).font(.caption).foregroundStyle(.secondary)
+                    if p.status != .granted {
+                        if case .notDetermined = p.status, let ask = p.request {
+                            Button("Ask") { ask(); refreshSoon() }.buttonStyle(.akariSolid)
+                        } else if let pane = p.pane {
+                            Button("Open Settings") {
+                                NSWorkspace.shared.open(PermissionsService.settingsURL(pane: pane))
+                            }.buttonStyle(.akariSolid)
+                        } else if p.id == "not" {
+                            Button("Open Settings") {
+                                NSWorkspace.shared.open(PermissionsService.notificationsSettingsURL)
+                            }.buttonStyle(.akariSolid)
+                        }
+                    }
+                }
+            }
+        } header: {
+            Text("Permissions")
+        } footer: {
+            Text("Akari asks for each permission the first time a feature needs it — and when you save an automation, it asks to control the target apps right away, so a scheduled run never stalls on a hidden dialog. Everything stays on this Mac.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        .task { await refresh() }
+    }
+
+    private func color(_ s: PermissionsService.Status) -> Color {
+        switch s {
+        case .granted:      return .green
+        case .denied:       return .red
+        case .notDetermined: return .orange
+        case .unavailable:  return .gray
+        }
+    }
+
+    private func refreshSoon() {
+        Task { try? await Task.sleep(nanoseconds: 1_500_000_000); await refresh() }
+    }
+
+    @MainActor
+    private func refresh() async {
+        var out: [Item] = [
+            Item(id: "ax", icon: "hand.point.up.left", name: "Accessibility",
+                 status: PermissionsService.accessibility(), pane: "Privacy_Accessibility", request: nil),
+            Item(id: "sr", icon: "rectangle.dashed.badge.record", name: "Screen Recording",
+                 status: PermissionsService.screenRecording(), pane: "Privacy_ScreenCapture", request: nil),
+            Item(id: "cal", icon: "calendar", name: "Calendars",
+                 status: PermissionsService.calendars(), pane: "Privacy_Calendars", request: nil),
+            Item(id: "rem", icon: "checklist", name: "Reminders",
+                 status: PermissionsService.reminders(), pane: "Privacy_Reminders", request: nil),
+            Item(id: "loc", icon: "location", name: "Location (Wi-Fi triggers)",
+                 status: PermissionsService.location(), pane: "Privacy_LocationServices",
+                 request: { PermissionsService.requestLocation() }),
+            Item(id: "not", icon: "bell.badge", name: "Notifications",
+                 status: await PermissionsService.notifications(), pane: nil,
+                 request: { PermissionsService.requestNotifications() }),
+        ]
+        // Per-app Automation consent for the apps saved automations actually control.
+        var targets: [String] = []
+        for a in AutomationStore.shared.automations {
+            guard let r = RecipeStore.shared.recipes.first(where: { $0.id == a.recipeId }) else { continue }
+            for t in PermissionsService.tellTargets(in: r.body) where !targets.contains(t) { targets.append(t) }
+        }
+        for t in targets {
+            out.append(Item(id: "auto-\(t)", icon: "gearshape.arrow.triangle.2.circlepath",
+                            name: "Automation: \(t)",
+                            status: PermissionsService.automationStatus(for: t),
+                            pane: "Privacy_Automation", request: nil))
+        }
+        items = out
     }
 }
 

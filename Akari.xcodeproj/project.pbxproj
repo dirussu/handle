@@ -291,6 +291,8 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSAppleEventsUsageDescription = "Akari uses System Events to paste drafted replies into the chat field you have focused — for example, when you ask it to draft a message in iMessage.";
+				INFOPLIST_KEY_NSLocationUsageDescription = "Akari reads your Wi-Fi network name to run join-this-network automations. It never leaves your Mac.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Akari reads your Wi-Fi network name to run join-this-network automations. It never leaves your Mac.";
 				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "Akari uses your calendar to create events you ask it to add — for example, when you screenshot an invite and ask Akari to schedule it.";
 				INFOPLIST_KEY_NSCalendarsUsageDescription = "Akari uses your calendar to create events you ask it to add — for example, when you screenshot an invite and ask Akari to schedule it.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
@@ -332,6 +334,8 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSAppleEventsUsageDescription = "Akari uses System Events to paste drafted replies into the chat field you have focused — for example, when you ask it to draft a message in iMessage.";
+				INFOPLIST_KEY_NSLocationUsageDescription = "Akari reads your Wi-Fi network name to run join-this-network automations. It never leaves your Mac.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Akari reads your Wi-Fi network name to run join-this-network automations. It never leaves your Mac.";
 				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "Akari uses your calendar to create events you ask it to add — for example, when you screenshot an invite and ask Akari to schedule it.";
 				INFOPLIST_KEY_NSCalendarsUsageDescription = "Akari uses your calendar to create events you ask it to add — for example, when you screenshot an invite and ask Akari to schedule it.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
