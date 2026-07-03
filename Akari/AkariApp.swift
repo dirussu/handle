@@ -156,7 +156,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private func beginVoiceCapture() async {
         guard !isVoiceRecording, !isPresentingOverlay else { return }
         isVoiceRecording = true
-        NotchController.shared.setWorking(true)   // "engaged" cue while listening
+        NotchController.shared.setListening(true)   // mic-bars drop while recording
         await SpeechService.shared.startRecording()
     }
 
@@ -165,8 +165,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         guard isVoiceRecording else { return }
         isVoiceRecording = false
         let transcript = await SpeechService.shared.stopRecordingAndTranscribe()
+        NotchController.shared.setListening(false)   // bars go; the loop shows the comet next
         let text = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { NotchController.shared.setWorking(false); NSSound.beep(); return }
+        guard !text.isEmpty else { NSSound.beep(); return }
         await handleVoiceCommand(transcript: text)
     }
 
@@ -956,6 +957,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 else if cmd == "__trigtest__" { self?.runTrigTest() }
                 else if cmd == "__trigapptest__" { self?.runTrigAppTest() }
                 else if cmd == "__permstest__" { await self?.runPermsTest() }
+                else if cmd == "__listentest__" {
+                    // Show the listening drop (idle-shimmer, no mic); auto-off after 12s.
+                    NotchController.shared.setListening(true)
+                    Task { @MainActor in try? await Task.sleep(for: .seconds(12)); NotchController.shared.setListening(false) }
+                }
+                else if cmd == "__grabscreen__" {
+                    // Akari writes its OWN screen capture to /tmp (it holds Screen
+                    // Recording; the shell tool doesn't) — for eyeballing the notch UI.
+                    if let screen = NSScreen.main,
+                       let img = try? await ScreenCapture.captureRegion(CGRect(origin: .zero, size: screen.frame.size), on: screen) {
+                        let rep = NSBitmapImageRep(cgImage: img)
+                        if let data = rep.representation(using: .png, properties: [:]) {
+                            try? data.write(to: URL(fileURLWithPath: "/tmp/akari_grab.png"))
+                            agentLog.info("grabscreen: wrote /tmp/akari_grab.png")
+                        }
+                    }
+                }
                 else if cmd.hasPrefix("__clicktest__ ") { await self?.runPointingHarness(query: String(cmd.dropFirst(14)), click: true) }
                 else if cmd.hasPrefix("__voicefile__ ") {
                     let t = await SpeechService.shared.transcribe(fileURL: URL(fileURLWithPath: String(cmd.dropFirst(14))))

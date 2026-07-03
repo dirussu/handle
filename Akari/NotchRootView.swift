@@ -55,6 +55,17 @@ struct NotchRootView: View {
         VStack(spacing: 0) {
             notchSurface
 
+            // Listening drop — mic bars in a gooey blob hanging from the pill while
+            // recording voice. Negative top padding overlaps the pill bottom so the
+            // blob's lip merges into the notch (one continuous black mass).
+            if vm.phase == .closed && vm.isListening {
+                VoiceOrbView()
+                    .frame(width: vm.closedSize.width, height: 78)
+                    .padding(.top, -18)
+                    .transition(.opacity)
+                    .allowsHitTesting(false)
+            }
+
             // Notification center — a count pill that drops out from beneath
             // the closed notch and expands into a stack of result cards.
             if vm.phase == .closed && !vm.notifications.isEmpty {

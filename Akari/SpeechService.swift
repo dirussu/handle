@@ -19,6 +19,27 @@ final class SpeechService: ObservableObject {
     enum State: Equatable { case idle, loading, recording, transcribing, failed(String) }
     @Published private(set) var state: State = .idle
 
+    /// Smoothed mic amplitude, 0…1 — drives the listening bars. A plain var (not
+    /// @Published): the notch orb reads it every frame via TimelineView, so it needs
+    /// no change-notification churn. Updated on the main actor from the audio callback.
+    private(set) var level: Float = 0
+
+    /// RMS over the recent tail of a sample buffer (robust to new-buffer vs cumulative).
+    static func rms(_ samples: [Float]) -> Float {
+        guard !samples.isEmpty else { return 0 }
+        let tail = samples.suffix(2400)   // ~0.15 s at 16 kHz = current loudness
+        var sum: Float = 0
+        for s in tail { sum += s * s }
+        return (sum / Float(tail.count)).squareRoot()
+    }
+
+    /// Normalize speech RMS (~0.01–0.2) to 0…1, then smooth: fast attack so bars pop
+    /// on speech, slow release so they ease down on a pause.
+    private func pushLevel(_ rms: Float) {
+        let norm = min(1, max(0, (rms - 0.004) * 9))
+        level = norm > level ? (level * 0.4 + norm * 0.6) : (level * 0.85 + norm * 0.15)
+    }
+
     /// Whisper model. Quantized turbo-large (~630 MB): near-best accuracy, and the
     /// "turbo" decoder keeps a push-to-talk clip's transcription well under a second on
     /// Apple Silicon. Chosen over "base" (which misheard "empty the trash" as "Antiva
@@ -61,7 +82,13 @@ final class SpeechService: ObservableObject {
         do {
             let wk = try await ensureModel()
             wk.audioProcessor.purgeAudioSamples(keepingLast: 0)
-            try wk.audioProcessor.startRecordingLive(callback: nil)
+            level = 0
+            // Live samples arrive on an audio thread → compute RMS there, hop to main
+            // to update the level that drives the listening bars.
+            try wk.audioProcessor.startRecordingLive { [weak self] buffer in
+                let r = SpeechService.rms(buffer)
+                Task { @MainActor in self?.pushLevel(r) }
+            }
             state = .recording
             voiceLog.info("voice: recording")
         } catch {
@@ -76,6 +103,7 @@ final class SpeechService: ObservableObject {
     func stopRecordingAndTranscribe() async -> String {
         guard let wk = whisperKit, state == .recording else { return "" }
         wk.audioProcessor.stopRecording()
+        level = 0
         let samples = Array(wk.audioProcessor.audioSamples)
         guard samples.count > 8000 else {   // < 0.5 s at 16 kHz = an accidental tap
             state = .idle
