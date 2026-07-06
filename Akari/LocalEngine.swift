@@ -92,7 +92,7 @@ final class LocalEngine: ObservableObject {
                 extraEOSTokens: visionModelID.contains("gemma") ? ["<end_of_turn>"] : []
             )
             let container = try await VLMModelFactory.shared.loadContainer(
-                hub: HubApi(),
+                hub: HubApi(downloadBase: ModelStorage.base),   // Settings → Storage relocator
                 configuration: configuration
             ) { progress in
                 Task { @MainActor in

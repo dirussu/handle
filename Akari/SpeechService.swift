@@ -57,7 +57,9 @@ final class SpeechService: ObservableObject {
         let t = Task { () throws -> WhisperKit in
             state = .loading
             voiceLog.info("voice: loading WhisperKit \(self.modelName, privacy: .public)…")
-            let wk = try await WhisperKit(WhisperKitConfig(model: self.modelName, verbose: false, logLevel: .error))
+            let wk = try await WhisperKit(WhisperKitConfig(model: self.modelName,
+                                                           downloadBase: await ModelStorage.base,   // Settings → Storage relocator
+                                                           verbose: false, logLevel: .error))
             voiceLog.info("voice: WhisperKit ready")
             return wk
         }
@@ -128,7 +130,9 @@ final class SpeechService: ObservableObject {
     func transcribe(fileURL: URL) async -> String {
         do {
             let wk = try await ensureModel()
+            voiceLog.info("voice: file transcribe starting for \(fileURL.lastPathComponent, privacy: .public)")
             let results = try await wk.transcribe(audioPath: fileURL.path)
+            voiceLog.info("voice: file transcribe done (\(results.count) segment(s))")
             return Self.clean(results.map(\.text).joined(separator: " "))
         } catch {
             voiceLog.error("voice: file transcribe failed: \(error.localizedDescription, privacy: .public)")
