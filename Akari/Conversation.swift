@@ -105,6 +105,12 @@ final class Conversation {
     /// self-contained turns that don't need machine awareness.
     var pendingContextPreamble: String = ""
 
+    /// Remembered user facts relevant to the CURRENT turn, folded into the
+    /// prompt right next to the user's text (the 4B ignores context placed
+    /// before a long tool spec). Set per-turn by the memory injection in
+    /// `runToolLoop`; consumed by the first `streamOneTurn`.
+    var pendingMemory: String = ""
+
     /// A PDF queued to be sent with the user's next message.
     var pendingPDF: PendingPDF?
 

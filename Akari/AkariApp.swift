@@ -679,6 +679,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             return
         }
 
+        // 2b. MEMORY — explicit "remember that…" / "forget…" turns are handled by
+        // deterministic code, never a model turn (facts enter memory only
+        // explicitly — PRODUCT.md memory layer; the user can read the whole store
+        // in Settings → Memory).
+        if !isInitial, let fact = parseRememberCommand(userText) {
+            let stored = await MemoryStore.shared.remember(fact)
+            let reply = stored != nil ? "Remembered: \(fact)" : "I couldn't save that."
+            conversation.commitAssistantMessage(reply)
+            Task { await AuditLog.shared.record(tool: "remember", argsJSON: "{}", outcome: stored != nil ? "ok" : "error", summary: String(fact.prefix(80)), confirmed: false) }
+            return
+        }
+        if !isInitial, let phrase = parseForgetCommand(userText) {
+            let matches = await MemoryStore.shared.matching(phrase)
+            switch matches.count {
+            case 0:
+                conversation.commitAssistantMessage("I don't have anything remembered about that.")
+            case 1:
+                await MemoryStore.shared.delete(id: matches[0].id)
+                conversation.commitAssistantMessage("Forgotten: \(matches[0].content)")
+                Task { await AuditLog.shared.record(tool: "forget", argsJSON: "{}", outcome: "ok", summary: String(matches[0].content.prefix(80)), confirmed: false) }
+            default:
+                conversation.commitAssistantMessage("That matches \(matches.count) remembered facts — remove the right one in Settings → Memory.")
+            }
+            return
+        }
+
+        // Memory injection — the top keyword-matched facts, folded RIGHT NEXT
+        // to the user's text by streamOneTurn (its own slot, not the context
+        // preamble: sandwiched before the tool spec the 4B ignored it —
+        // verified live). Empty for prompts that touch nothing remembered.
+        if !userText.isEmpty {
+            let facts = await MemoryStore.shared.relevant(to: userText)
+            conversation.pendingMemory = MemoryStore.preamble(for: facts)
+            if !facts.isEmpty {
+                agentLog.info("memory: injecting \(facts.count) fact(s) for this turn")
+            }
+        }
+
         // 3. Plain explain/ask — no tools, identical to the old single-turn path.
         guard !isInitial, promptAsksToAct(userText) else {
             _ = await streamOneTurn(in: conversation, instr: "")
@@ -788,11 +826,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private func streamOneTurn(in conversation: Conversation, instr: String, display: Bool = true) async -> String {
         let preamble = conversation.pendingContextPreamble
         conversation.pendingContextPreamble = ""
+        // Memory sits CLOSEST to the user's text — last position wins the 4B's
+        // attention; before the tool spec it gets ignored (verified live).
+        let memory = conversation.pendingMemory
+        conversation.pendingMemory = ""
         let image = conversation.messages.last(where: { $0.role == .user })?.image
         let stream: AsyncThrowingStream<String, Error>
         if let image {
             let userText = conversation.messages.last(where: { $0.role == .user })?.text ?? ""
-            let prompt = [preamble, instr, userText].filter { !$0.isEmpty }.joined(separator: "\n\n")
+            let prompt = [preamble, instr, memory, userText].filter { !$0.isEmpty }.joined(separator: "\n\n")
             agentLog.info("streamOneTurn: See. prompt=\"\(userText, privacy: .public)\"")
             stream = LocalEngine.shared.explain(image: image, prompt: prompt)
         } else {
@@ -800,7 +842,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 .filter { !$0.text.isEmpty }
                 .map { LocalEngine.ChatTurn(role: $0.role == .user ? .user : .assistant, text: $0.text) }
             guard !history.isEmpty else { return "" }
-            let fold = [preamble, instr].filter { !$0.isEmpty }.joined(separator: "\n\n")
+            let fold = [preamble, instr, memory].filter { !$0.isEmpty }.joined(separator: "\n\n")
             if !fold.isEmpty, let last = history.indices.last {
                 history[last] = LocalEngine.ChatTurn(role: .user, text: fold + "\n\n" + history[last].text)
             }
@@ -866,8 +908,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         - draft_email_reply([to], [subject], body) — open an email draft in the mail app for the user to review and send (you NEVER send). Use for "reply to this email", "draft a response".
         - draft_imessage([to], body) — open a Messages draft for the user to review and send.
         - run_applescript(script, [purpose]) — do ANYTHING else on the Mac the other tools don't cover: open/quit apps, control Music/Mail/Finder/Safari, move files, change system settings, type or paste text. The user sees the script and confirms before it runs. Prefer simple, reliable idioms — open or focus an app with 'tell application "X" to activate'; for text longer than a few words set the clipboard then paste with Command-V rather than typing via System Events. Set `purpose` to one plain sentence saying what it does.
+        - list_shortcuts() / run_shortcut(name) — the user's Shortcuts.app shortcuts: list their names, or run one by its EXACT name (the user confirms). When the user says "run my X shortcut" use run_shortcut; if unsure of the exact name, call list_shortcuts first.\(ShellTool.shared.isEnabled ? "\n- run_shell(command, [working_directory]) — run one zsh command line (developer workflows: git, brew, npm, find). The user sees the exact command and confirms. Prefer the file tools for file operations." : "")
         - recapture_screen — a fresh screenshot of what's on screen now (call before answering if the screen may have changed).
         """
+    }
+
+    /// "remember that X" / "remember my X" / "remember I X" → the fact to store.
+    /// "remember to X" is deliberately NOT memory — that's a reminder request and
+    /// falls through to the normal loop (create_reminder).
+    func parseRememberCommand(_ text: String) -> String? {
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lower = t.lowercased()
+        guard lower.hasPrefix("remember ") else { return nil }
+        if lower.hasPrefix("remember to ") { return nil }
+        var rest = String(t.dropFirst("remember ".count))
+        if rest.lowercased().hasPrefix("that ") { rest = String(rest.dropFirst("that ".count)) }
+        let fact = rest.trimmingCharacters(in: .whitespacesAndNewlines)
+        return fact.isEmpty ? nil : fact
+    }
+
+    /// "forget (that|about|my) X" → the phrase to match against stored facts.
+    /// Bare "forget it" is colloquial, not a deletion.
+    func parseForgetCommand(_ text: String) -> String? {
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lower = t.lowercased()
+        guard lower.hasPrefix("forget ") else { return nil }
+        if lower == "forget it" || lower == "forget about it" { return nil }
+        var rest = String(t.dropFirst("forget ".count))
+        for prefix in ["that ", "about ", "what i said about "] where rest.lowercased().hasPrefix(prefix) {
+            rest = String(rest.dropFirst(prefix.count))
+        }
+        let phrase = rest.trimmingCharacters(in: .whitespacesAndNewlines)
+        return phrase.isEmpty ? nil : phrase
     }
 
     /// Does the prompt ask Akari to DO something (vs. explain/ask)? Gates the
@@ -989,6 +1061,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 else if cmd == "__trigtest__" { self?.runTrigTest() }
                 else if cmd == "__trigapptest__" { self?.runTrigAppTest() }
                 else if cmd == "__permstest__" { await self?.runPermsTest() }
+                else if cmd == "__memtest__" {
+                    // Round-trip + relevance on a THROWAWAY db.
+                    let store = MemoryStore(filename: "memory_selftest.db")
+                    await store.wipe()
+                    _ = await store.remember("Mary Chen's email is mary@acme.com")
+                    _ = await store.remember("the user schedules meetings in 30-minute slots")
+                    _ = await store.remember("Stripe receipts go to Business Expenses")
+                    let hit = await store.relevant(to: "draft an email to Mary")
+                    let miss = await store.relevant(to: "play some jazz")
+                    let dedup = await store.remember("mary chen's EMAIL is mary@acme.com")
+                    let all = await store.all()
+                    let firstHit = (hit.first?.content.prefix(30)).map(String.init) ?? "-"
+                    let dedupLabel = (dedup?.id == all.last?.id) ? "reused" : "new"
+                    agentLog.info("memtest: hit=\(hit.count) first=\"\(firstHit, privacy: .public)\" miss=\(miss.count) (want ≥1/mary, 0) kept=\(all.count) (want 3) dedup=\(dedupLabel, privacy: .public)")
+                    await store.wipe()
+                    let wiped = await store.all()
+                    agentLog.info("memtest: after wipe=\(wiped.count) (want 0)")
+                }
                 else if cmd == "__convstoretest__" {
                     // Round-trip against a THROWAWAY db file (never the real history).
                     let store = ConversationStore(filename: "conversations_selftest.db")
@@ -1592,6 +1682,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         longConvo.addUserMessage(String(repeating: "x", count: 200))
         longConvo.commitAssistantMessage("ok")
         check("snapshot title capped 60", longConvo.snapshot()?.title.count == 60)
+        // Memory — the remember/forget gates and the keyword scorer
+        check("remember that → fact", parseRememberCommand("remember that Mary's email is mary@acme.com") == "Mary's email is mary@acme.com")
+        check("remember my → fact", parseRememberCommand("remember my wifi is CasaDima") == "my wifi is CasaDima")
+        check("remember to → nil (reminder!)", parseRememberCommand("remember to buy milk tomorrow") == nil)
+        check("plain prompt → nil", parseRememberCommand("what's on my calendar") == nil)
+        check("forget about → phrase", parseForgetCommand("forget about my wifi") == "my wifi")
+        check("forget that → phrase", parseForgetCommand("forget that Mary thing") == "Mary thing")
+        check("forget it → nil", parseForgetCommand("forget it") == nil)
+        check("mem tokens keep names", MemoryStore.tokens("Mary's email is mary@acme.com").contains("mary"))
+        check("mem tokens drop stopwords", !MemoryStore.tokens("remember that this is for you").contains("remember"))
+        check("mem tokens drop short", !MemoryStore.tokens("go to it").contains("go"))
+        check("mem preamble empty", MemoryStore.preamble(for: []).isEmpty)
+        check("mem preamble bullets", MemoryStore.preamble(for: [MemoryFact(id: "1", content: "likes tea", createdAt: Date())]).contains("- likes tea"))
         // Function-call fallback: the 7B sometimes emits name(k="v") instead of JSON.
         check("fncall parses", parseToolCall("create_reminder(title=\"Call mom\", priority=\"high\")").map { $0.name == "create_reminder" && ($0.args["title"] as? String) == "Call mom" } ?? false)
         check("fncall prose→nil", parseToolCall("You can use open_url(url) to open a link.") == nil)
