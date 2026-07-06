@@ -22,6 +22,7 @@ enum ToolRegistry {
         t += EmailTools.tools
         t += MessageTools.tools
         t += AppleScriptTool.tools
+        t += ShortcutsTools.tools
         t += ShellTool.tools
         return t
     }
@@ -113,6 +114,28 @@ enum ToolRegistry {
                 try EmailTools.shared.openMailDraft(to: input.to, subject: input.subject, body: input.body)
                 return ToolResult(content: "Opened an email draft\(input.to.map { " to \($0)" } ?? "") in your mail app — review and send it yourself.",
                                   isError: false, displaySummary: "Email draft ready")
+            case "list_shortcuts":
+                let names = try await ShortcutsTools.shared.listNames()
+                return ToolResult(content: names.isEmpty ? "(no shortcuts installed)" : names.joined(separator: "\n"),
+                                  isError: false, displaySummary: "\(names.count) shortcut(s)")
+            case "run_shortcut":            // .confirm — the user has seen the name and approved it
+                let input = try ShortcutsTools.shared.decodeRun(argsJSON)
+                let output = try await ShortcutsTools.shared.run(name: input.name)
+                return ToolResult(content: output, isError: false, displaySummary: "Ran “\(input.name)”")
+            case "run_shell":               // .confirm — user saw the exact command line
+                guard ShellTool.shared.isEnabled else { throw ShellToolError.disabled }
+                let input = try ShellTool.shared.decode(argsJSON)
+                let cwd: URL
+                if let dir = input.working_directory, !dir.isEmpty {
+                    cwd = WorkspaceManager.shared.resolve(dir)
+                    guard WorkspaceManager.shared.isAllowed(cwd) else { throw ShellToolError.cwdNotAllowed(cwd.path) }
+                } else {
+                    cwd = try WorkspaceManager.shared.ensureWorkspaceExists()
+                }
+                let r = try await ShellTool.shared.run(command: input.command, cwd: cwd)
+                return ToolResult(content: r.output,
+                                  isError: r.exitCode != 0,
+                                  displaySummary: r.exitCode == 0 ? "Command ran" : "Exit \(r.exitCode)")
             case "draft_imessage":          // .confirm — opens Messages pre-filled (sms:); NEVER sends
                 let input = try MessageTools.shared.decodeDraft(from: argsJSON)
                 try MessageTools.shared.openMessageDraft(to: input.to, body: input.body)

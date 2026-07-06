@@ -720,7 +720,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                             // A mutating/consequential tool is DONE — conclude; never let the loop
                             // re-call it (that would double-act: two drafts, two events). Read-only
                             // tools stay non-terminal so the model can use the data to answer.
-                            let readOnly: Set<String> = ["read_calendar_events", "list_reminders", "list_files", "read_file"]
+                            let readOnly: Set<String> = ["read_calendar_events", "list_reminders", "list_files", "read_file", "list_shortcuts"]
                             if !readOnly.contains(call.name) { terminalDone = true }
                         }
                         var hint = ""
@@ -965,6 +965,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 else if cmd == "__trigtest__" { self?.runTrigTest() }
                 else if cmd == "__trigapptest__" { self?.runTrigAppTest() }
                 else if cmd == "__permstest__" { await self?.runPermsTest() }
+                else if cmd == "__shortcutstest__" {
+                    // list via the real tool path; run only if a shortcut named
+                    // "Akari Test" exists (create one by hand for the full round-trip).
+                    do {
+                        let names = try await ShortcutsTools.shared.listNames()
+                        agentLog.info("shortcutstest: \(names.count) installed — \(names.prefix(10).joined(separator: " | "), privacy: .public)")
+                        if names.contains("Akari Test") {
+                            let out = try await ShortcutsTools.shared.run(name: "Akari Test")
+                            agentLog.info("shortcutstest: run → \(out, privacy: .public)")
+                        } else {
+                            agentLog.info("shortcutstest: no “Akari Test” shortcut — run skipped")
+                        }
+                    } catch {
+                        agentLog.info("shortcutstest: ERROR \(error.localizedDescription, privacy: .public)")
+                    }
+                }
                 else if cmd == "__voicereltest__" {
                     // The REAL push-to-talk path, headless: begin (mic records silence),
                     // hold 3s, release — exercises the exact keyUp code incl. transcribe.
@@ -1498,6 +1514,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         check("reg write_file=confirm", ToolRegistry.tool(named: "write_file")?.confirmation == .confirm)   // preview before mutation
         check("reg draft_email=confirm", ToolRegistry.tool(named: "draft_email_reply")?.confirmation == .confirm)
         check("reg draft_imessage=confirm", ToolRegistry.tool(named: "draft_imessage")?.confirmation == .confirm)
+        // Shortcuts tools (AGENTS.md Phase 0): trigger-by-name only, list is read-only.
+        check("reg list_shortcuts=auto", ToolRegistry.tool(named: "list_shortcuts")?.confirmation == .auto)
+        check("reg run_shortcut=confirm", ToolRegistry.tool(named: "run_shortcut")?.confirmation == .confirm)
+        check("shortcut decode name", (try? ShortcutsTools.shared.decodeRun(#"{"name":"Morning Routine"}"#))?.name == "Morning Routine")
+        check("shortcut decode missing → throws", (try? ShortcutsTools.shared.decodeRun(#"{"title":"x"}"#)) == nil)
+        check("promptSpec names run_shortcut", ToolRegistry.promptSpec(for: ShortcutsTools.tools).contains("run_shortcut(name)"))
         // Function-call fallback: the 7B sometimes emits name(k="v") instead of JSON.
         check("fncall parses", parseToolCall("create_reminder(title=\"Call mom\", priority=\"high\")").map { $0.name == "create_reminder" && ($0.args["title"] as? String) == "Call mom" } ?? false)
         check("fncall prose→nil", parseToolCall("You can use open_url(url) to open a link.") == nil)
