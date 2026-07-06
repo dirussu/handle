@@ -1695,6 +1695,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         check("mem tokens drop short", !MemoryStore.tokens("go to it").contains("go"))
         check("mem preamble empty", MemoryStore.preamble(for: []).isEmpty)
         check("mem preamble bullets", MemoryStore.preamble(for: [MemoryFact(id: "1", content: "likes tea", createdAt: Date())]).contains("- likes tea"))
+        // Automation edit — the time parser behind the Settings editor
+        check("parseTime 18:30", AutomationSchedule.parseTime("18:30")?.hour == 18)
+        check("parseTime 8:05 minute", AutomationSchedule.parseTime("8:05")?.minute == 5)
+        check("parseTime pads back", AutomationSchedule(hour: 8, minute: 5, days: nil).timeText == "8:05")
+        check("parseTime 24:00 → nil", AutomationSchedule.parseTime("24:00") == nil)
+        check("parseTime 9:60 → nil", AutomationSchedule.parseTime("9:60") == nil)
+        check("parseTime junk → nil", AutomationSchedule.parseTime("six pm") == nil)
         // Function-call fallback: the 7B sometimes emits name(k="v") instead of JSON.
         check("fncall parses", parseToolCall("create_reminder(title=\"Call mom\", priority=\"high\")").map { $0.name == "create_reminder" && ($0.args["title"] as? String) == "Call mom" } ?? false)
         check("fncall prose→nil", parseToolCall("You can use open_url(url) to open a link.") == nil)

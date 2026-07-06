@@ -61,6 +61,19 @@ struct AutomationSchedule: Codable {
         }
         return "every day at \(t)"
     }
+
+    /// "18:30" / "8:05" → (18, 30) / (8, 5); nil for anything malformed.
+    /// The edit UI's time field parses through this (kept here for self-tests).
+    static func parseTime(_ s: String) -> (hour: Int, minute: Int)? {
+        let parts = s.trimmingCharacters(in: .whitespaces).split(separator: ":")
+        guard parts.count == 2,
+              let h = Int(parts[0]), let m = Int(parts[1]),
+              (0...23).contains(h), (0...59).contains(m) else { return nil }
+        return (h, m)
+    }
+
+    /// The time as the edit field's text ("18:05").
+    var timeText: String { String(format: "%d:%02d", hour, minute) }
 }
 
 /// Persists saved automations to ~/Library/Application Support/Akari/automations.json.
