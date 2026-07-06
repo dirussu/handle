@@ -196,6 +196,14 @@ final class NotchController {
         if andOpen { open(notchUnderCursor()) }
     }
 
+    /// First-run: land every display's panel on the onboarding page and open
+    /// the one under the cursor.
+    func showOnboarding() {
+        install()
+        for n in notches { n.vm.route = .onboarding }
+        open(notchUnderCursor())
+    }
+
     func setWorking(_ working: Bool) {
         install()
         self.working = working

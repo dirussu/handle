@@ -11,10 +11,11 @@ enum NotchPhase {
 /// surface — Settings and About are pages within it (reached via the ⋯
 /// menu), not separate windows.
 enum NotchRoute {
-    case chat       // the assistant surface (default)
-    case history    // saved conversations (reopen / delete)
+    case chat        // the assistant surface (default)
+    case history     // saved conversations (reopen / delete)
     case settings
     case about
+    case onboarding  // first-run walk-through (until Onboarding.isDone)
 }
 
 /// Observable state for the notch surface. The `NotchController` mutates it;

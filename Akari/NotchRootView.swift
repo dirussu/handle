@@ -212,10 +212,11 @@ struct NotchRootView: View {
 
     private var routeTitle: String {
         switch vm.route {
-        case .chat:     return ""
-        case .history:  return "History"
-        case .settings: return "Settings"
-        case .about:    return "About"
+        case .chat:       return ""
+        case .history:    return "History"
+        case .settings:   return "Settings"
+        case .about:      return "About"
+        case .onboarding: return "Welcome"
         }
     }
 
@@ -286,6 +287,9 @@ struct NotchRootView: View {
                 .padding(.horizontal, AkariSpacing.s)
         case .about:
             AboutBody(onDone: { withAnimation(AkariMotion.open) { vm.route = .chat } })
+                .padding(.horizontal, contentInset)
+        case .onboarding:
+            OnboardingBody(onDone: { withAnimation(AkariMotion.open) { vm.route = .chat } })
                 .padding(.horizontal, contentInset)
         }
     }

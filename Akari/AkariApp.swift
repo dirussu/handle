@@ -84,6 +84,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         UNUserNotificationCenter.current().delegate = self
         Task { await NotificationsService.shared.requestAuthorization() }
 
+        // First run: open the panel on the onboarding walk-through (hardware
+        // check → staged permissions → model disclosure). Repeats each launch
+        // until completed.
+        if !Onboarding.isDone {
+            NotchController.shared.showOnboarding()
+            agentLog.info("onboarding: first run — walk-through shown (panel open: \(NotchController.shared.isPanelOpen))")
+        }
+
         print("[Akari] Ready. Hover the notch, or double-tap ⌥ to capture.")
     }
 
@@ -1702,6 +1710,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         check("parseTime 24:00 → nil", AutomationSchedule.parseTime("24:00") == nil)
         check("parseTime 9:60 → nil", AutomationSchedule.parseTime("9:60") == nil)
         check("parseTime junk → nil", AutomationSchedule.parseTime("six pm") == nil)
+        // Onboarding hardware bar (M1+/16 GB, PRODUCT.md: refuse, don't degrade)
+        check("hw M1/16 ok", Onboarding.hardwareOK(memGB: 16, isAppleSilicon: true))
+        check("hw M-series/8 refuse", !Onboarding.hardwareOK(memGB: 8, isAppleSilicon: true))
+        check("hw intel/32 refuse", !Onboarding.hardwareOK(memGB: 32, isAppleSilicon: false))
+        check("hw this Mac passes", Onboarding.hardwareOK(memGB: Onboarding.currentMemGB, isAppleSilicon: Onboarding.currentIsAppleSilicon))
         // Function-call fallback: the 7B sometimes emits name(k="v") instead of JSON.
         check("fncall parses", parseToolCall("create_reminder(title=\"Call mom\", priority=\"high\")").map { $0.name == "create_reminder" && ($0.args["title"] as? String) == "Call mom" } ?? false)
         check("fncall prose→nil", parseToolCall("You can use open_url(url) to open a link.") == nil)

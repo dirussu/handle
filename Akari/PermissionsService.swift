@@ -80,6 +80,26 @@ enum PermissionsService {
         AVCaptureDevice.requestAccess(for: .audio) { _ in }
     }
 
+    // Onboarding-time prompts. AX/SR "denied" really means "not in the list
+    // yet" on first run — these put the app IN the list with the system prompt.
+
+    static func requestAccessibility() {
+        let opts = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
+        _ = AXIsProcessTrustedWithOptions(opts)
+    }
+
+    static func requestScreenRecording() {
+        _ = CGRequestScreenCaptureAccess()
+    }
+
+    static func requestCalendars() {
+        EKEventStore().requestFullAccessToEvents { _, _ in }
+    }
+
+    static func requestReminders() {
+        EKEventStore().requestFullAccessToReminders { _, _ in }
+    }
+
     // MARK: - Automation (AppleEvents) — per-target-app
 
     /// Map AEDeterminePermissionToAutomateTarget's OSStatus to a Status.
