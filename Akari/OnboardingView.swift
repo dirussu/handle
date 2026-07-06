@@ -155,6 +155,7 @@ private struct OnboardingPermissionList: View {
         let why: String
         let status: PermissionsService.Status
         let request: () -> Void
+        var settingsURL: URL?   // fallback when the OS won't prompt again (denied)
     }
     @State private var rows: [Row] = []
 
@@ -172,6 +173,13 @@ private struct OnboardingPermissionList: View {
                     if r.status == .granted {
                         Image(systemName: "checkmark.circle.fill")
                             .font(.system(size: 12)).foregroundStyle(.green)
+                    } else if case .notDetermined = r.status {
+                        Button("Grant") { r.request(); refreshSoon() }
+                            .buttonStyle(.akariSolid)
+                    } else if let url = r.settingsURL {
+                        // Denied: macOS won't re-prompt — deep-link the pane.
+                        Button("Open Settings") { NSWorkspace.shared.open(url); refreshSoon() }
+                            .buttonStyle(.akariSolid)
                     } else {
                         Button("Grant") { r.request(); refreshSoon() }
                             .buttonStyle(.akariSolid)
@@ -212,8 +220,18 @@ private struct OnboardingPermissionList: View {
             Row(id: "not", icon: "bell.badge", name: "Notifications",
                 why: "so finished background tasks can tell you",
                 status: await PermissionsService.notifications(),
-                request: { PermissionsService.requestNotifications() }),
+                request: { PermissionsService.requestNotifications() },
+                settingsURL: PermissionsService.notificationsSettingsURL),
         ]
+        // Denied (≠ never-asked) can't re-prompt — give those rows their pane.
+        let panes = ["mic": "Privacy_Microphone", "cal": "Privacy_Calendars", "rem": "Privacy_Reminders"]
+        rows = rows.map { r in
+            var r = r
+            if r.settingsURL == nil, let pane = panes[r.id] {
+                r.settingsURL = PermissionsService.settingsURL(pane: pane)
+            }
+            return r
+        }
     }
 }
 
