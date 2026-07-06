@@ -64,6 +64,11 @@ final class Conversation {
     let originalBundleID: String?  // Frontmost app's bundle ID at capture time — used for "type into focused field" tools.
     let initialAction: ActionType
 
+    /// Stable identity for persistence — survives restore, so continuing a
+    /// reopened conversation updates its row instead of forking a new one.
+    let persistentID: String
+    let createdAt: Date
+
     /// Where the most-recent capture came from. Used to translate point_at coords
     /// (which Claude picks within the captured region) to absolute display coords.
     /// Mutable so that recapture_screen can refresh after the screen state changes.
@@ -120,6 +125,8 @@ final class Conversation {
     ) {
         self.displayImage = NSImage(cgImage: image, size: .zero)
         self.hasInitialCapture = true
+        self.persistentID = UUID().uuidString
+        self.createdAt = Date()
         self.appName = appName
         self.originalBundleID = originalBundleID
         self.initialAction = action
@@ -141,9 +148,11 @@ final class Conversation {
     /// A text-only "Ask" conversation — no capture, no synthesized first
     /// prompt. Every message is real and shown. Steered into See/Do as the
     /// thread evolves (the connective-tissue role from PRODUCT.md).
-    init(chatWithApp appName: String) {
+    init(chatWithApp appName: String, persistentID: String = UUID().uuidString, createdAt: Date = Date()) {
         self.displayImage = nil
         self.hasInitialCapture = false
+        self.persistentID = persistentID
+        self.createdAt = createdAt
         self.appName = appName
         self.originalBundleID = nil
         self.initialAction = .ask
@@ -309,5 +318,62 @@ final class Conversation {
         self.captureScreen = screen
         self.currentImagePixelSize = imagePixelSize
         self.axElements = axElements
+    }
+
+    // MARK: - Persistence (text-only snapshots — never captures/PDF bytes)
+
+    /// Reduce this conversation to its persistable text, or nil when there's
+    /// nothing worth saving (no real user/assistant turn yet). Tool chips
+    /// persist as role "tool" rows (name + summary + result text); synthesized
+    /// capture prompts and raw tool-result envelopes don't persist.
+    func snapshot() -> ConversationSnapshot? {
+        var saved: [SavedMessage] = []
+        let base = hasInitialCapture ? Array(messages.dropFirst()) : messages
+        for m in base {
+            switch m.role {
+            case .user:
+                guard !m.isToolResultOnly, !m.text.isEmpty else { continue }
+                saved.append(SavedMessage(role: "user", text: m.text, toolName: nil, toolSummary: nil))
+            case .assistant:
+                if let chip = m.toolUses.first, m.text.isEmpty {
+                    let result = toolResult(forUseId: chip.id)
+                    saved.append(SavedMessage(role: "tool",
+                                              text: result?.content ?? "",
+                                              toolName: chip.name,
+                                              toolSummary: result?.displaySummary))
+                } else if !m.text.isEmpty, !m.isStreaming {
+                    saved.append(SavedMessage(role: "assistant", text: m.text, toolName: nil, toolSummary: nil))
+                }
+            }
+        }
+        guard saved.contains(where: { $0.role != "tool" }) else { return nil }
+        let firstUser = saved.first(where: { $0.role == "user" })?.text ?? "Conversation"
+        let title = String(firstUser.split(separator: "\n").first.map(String.init) ?? firstUser).prefix(60)
+        return ConversationSnapshot(id: persistentID,
+                                    title: String(title),
+                                    appName: appName,
+                                    createdAt: createdAt,
+                                    updatedAt: Date(),
+                                    messages: saved)
+    }
+
+    /// Rebuild a (text-only, continuable) conversation from a snapshot. The
+    /// restored thread is an Ask conversation — no capture context — but keeps
+    /// its persistent identity, so further turns update the same row.
+    static func restore(from snap: ConversationSnapshot) -> Conversation {
+        let convo = Conversation(chatWithApp: snap.appName,
+                                 persistentID: snap.id,
+                                 createdAt: snap.createdAt)
+        for m in snap.messages {
+            switch m.role {
+            case "user":      convo.addUserMessage(m.text)
+            case "assistant": convo.commitAssistantMessage(m.text)
+            case "tool":
+                convo.addToolChip(name: m.toolName ?? "tool", inputJSON: "{}",
+                                  content: m.text, isError: false, displaySummary: m.toolSummary)
+            default: break
+            }
+        }
+        return convo
     }
 }

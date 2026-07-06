@@ -12,6 +12,7 @@ enum NotchPhase {
 /// menu), not separate windows.
 enum NotchRoute {
     case chat       // the assistant surface (default)
+    case history    // saved conversations (reopen / delete)
     case settings
     case about
 }
@@ -44,6 +45,8 @@ final class NotchViewModel: ObservableObject {
     var onSubmit: (String) -> Void = { _ in }
     var onAddPDF: () -> Void = {}
     var onClose: () -> Void = {}
+    /// Reopen a saved conversation by its persistent id (History page rows).
+    var onOpenSaved: (String) -> Void = { _ in }
 
     /// The hardware (or synthesized) notch dimensions for the closed pill.
     let closedSize: CGSize

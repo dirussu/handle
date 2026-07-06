@@ -74,6 +74,8 @@ final class NotchController {
     private var onSubmit: (String) -> Void = { _ in }
     private var onAddPDF: () -> Void = {}
     private var working = false
+    /// Wired once by the app at launch; survives every present()/rebuild().
+    var onOpenSaved: (String) -> Void = { _ in }
 
     // Pending completion notifications (the pill below the closed notch).
     private var notifications: [AkariNotification] = []
@@ -151,6 +153,7 @@ final class NotchController {
         vm.onSubmit = onSubmit
         vm.onAddPDF = onAddPDF
         vm.onClose = { [weak self, weak notch] in self?.close(notch) }
+        vm.onOpenSaved = { [weak self] id in self?.onOpenSaved(id) }
         vm.isWorking = working
         vm.notifications = notifications
     }

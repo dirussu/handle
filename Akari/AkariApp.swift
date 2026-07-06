@@ -69,6 +69,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         // closed pill is resident from the first frame.
         NotchController.shared.install()
 
+        // History page → reopen a saved conversation (text-only, continuable).
+        NotchController.shared.onOpenSaved = { [weak self] id in
+            Task { @MainActor in await self?.openSavedConversation(id: id) }
+        }
+
         // Pre-wire a fresh text-only "Ask" conversation (no capture) so the
         // input bar is ready the instant the user opens the notch — chat is
         // the connective tissue between See and Do (PRODUCT.md).
@@ -543,6 +548,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         return lines.joined(separator: "\n")
     }
 
+    /// Reopen a saved conversation from the History page: restore the text
+    /// transcript, make it the active conversation, and mount it. It keeps its
+    /// persistent id, so continuing it updates the same stored row.
+    private func openSavedConversation(id: String) async {
+        guard let snap = await ConversationStore.shared.load(id: id) else {
+            agentLog.info("history: no stored conversation for id \(id, privacy: .public)")
+            return
+        }
+        let convo = Conversation.restore(from: snap)
+        activeConversation = convo
+        presentConversation(convo)
+    }
+
     private func presentConversation(_ conversation: Conversation, andOpen: Bool = true) {
         NotchController.shared.present(
             conversation: conversation,
@@ -621,6 +639,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         defer {
             isAgentRunning = false
             NotchController.shared.setWorking(false)
+            // Persist the transcript on EVERY exit path (text-only snapshot; the
+            // loop is the single choke point all turns — typed, voice, capture —
+            // flow through).
+            if let snap = conversation.snapshot() {
+                Task.detached(priority: .utility) { await ConversationStore.shared.save(snap) }
+            }
             if !NotchController.shared.isPanelOpen {
                 let last = conversation.visibleMessages.last
                 let body = last.flatMap { $0.text.isEmpty ? nil : String($0.text.prefix(140)) } ?? "Task complete."
@@ -965,6 +989,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 else if cmd == "__trigtest__" { self?.runTrigTest() }
                 else if cmd == "__trigapptest__" { self?.runTrigAppTest() }
                 else if cmd == "__permstest__" { await self?.runPermsTest() }
+                else if cmd == "__convstoretest__" {
+                    // Round-trip against a THROWAWAY db file (never the real history).
+                    let store = ConversationStore(filename: "conversations_selftest.db")
+                    await store.deleteAll()
+                    let convo = Conversation(chatWithApp: "Probe")
+                    convo.addUserMessage("remember the milk")
+                    convo.commitAssistantMessage("Noted.")
+                    if let snap = convo.snapshot() {
+                        await store.save(snap)
+                        let listed = await store.list()
+                        let loaded = await store.load(id: snap.id)
+                        agentLog.info("convstoretest: list=\(listed.count) title=\"\(listed.first?.title ?? "-", privacy: .public)\" loadedMsgs=\(loaded?.messages.count ?? -1)")
+                        convo.addUserMessage("and the eggs")
+                        convo.commitAssistantMessage("Eggs too.")
+                        if let snap2 = convo.snapshot() { await store.save(snap2) }
+                        let relisted = await store.list()
+                        let reloaded = await store.load(id: snap.id)
+                        agentLog.info("convstoretest: upsert list=\(relisted.count) msgs=\(reloaded?.messages.count ?? -1) (want 1, 4)")
+                        await store.delete(id: snap.id)
+                        let afterDelete = await store.list()
+                        agentLog.info("convstoretest: after delete list=\(afterDelete.count) (want 0)")
+                    } else {
+                        agentLog.info("convstoretest: ERROR — snapshot was nil")
+                    }
+                }
                 else if cmd == "__shortcutstest__" {
                     // list via the real tool path; run only if a shortcut named
                     // "Akari Test" exists (create one by hand for the full round-trip).
@@ -1520,6 +1569,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         check("shortcut decode name", (try? ShortcutsTools.shared.decodeRun(#"{"name":"Morning Routine"}"#))?.name == "Morning Routine")
         check("shortcut decode missing → throws", (try? ShortcutsTools.shared.decodeRun(#"{"title":"x"}"#)) == nil)
         check("promptSpec names run_shortcut", ToolRegistry.promptSpec(for: ShortcutsTools.tools).contains("run_shortcut(name)"))
+        // Conversation snapshots (persistence is TEXT-only; nothing saves until a real turn exists)
+        let emptyConvo = Conversation(chatWithApp: "Test")
+        check("snapshot empty → nil", emptyConvo.snapshot() == nil)
+        let convo = Conversation(chatWithApp: "Test")
+        convo.addUserMessage("What's on my calendar today?\nsecond line")
+        convo.commitAssistantMessage("Three events.")
+        convo.addToolChip(name: "read_calendar_events", inputJSON: "{}", content: "3 events", isError: false, displaySummary: "3 event(s)")
+        let snap = convo.snapshot()
+        check("snapshot exists", snap != nil)
+        check("snapshot title = first user line", snap?.title == "What's on my calendar today?")
+        check("snapshot keeps 3 rows", snap?.messages.count == 3)
+        check("snapshot chip → tool row", snap?.messages.last?.toolName == "read_calendar_events")
+        check("snapshot id stable", snap?.id == convo.persistentID)
+        if let snap {
+            let restored = Conversation.restore(from: snap)
+            check("restore keeps id", restored.persistentID == convo.persistentID)
+            check("restore keeps turns", restored.snapshot()?.messages.count == 3)
+            check("restore visible count", restored.visibleMessages.count == convo.visibleMessages.count)
+        }
+        let longConvo = Conversation(chatWithApp: "")
+        longConvo.addUserMessage(String(repeating: "x", count: 200))
+        longConvo.commitAssistantMessage("ok")
+        check("snapshot title capped 60", longConvo.snapshot()?.title.count == 60)
         // Function-call fallback: the 7B sometimes emits name(k="v") instead of JSON.
         check("fncall parses", parseToolCall("create_reminder(title=\"Call mom\", priority=\"high\")").map { $0.name == "create_reminder" && ($0.args["title"] as? String) == "Call mom" } ?? false)
         check("fncall prose→nil", parseToolCall("You can use open_url(url) to open a link.") == nil)

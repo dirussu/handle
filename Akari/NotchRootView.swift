@@ -213,6 +213,7 @@ struct NotchRootView: View {
     private var routeTitle: String {
         switch vm.route {
         case .chat:     return ""
+        case .history:  return "History"
         case .settings: return "Settings"
         case .about:    return "About"
         }
@@ -239,6 +240,10 @@ struct NotchRootView: View {
     /// (black fill, white hairline, white-only rows that highlight on hover).
     private var menuDropdown: some View {
         VStack(alignment: .leading, spacing: 2) {
+            MenuRow(title: "History", systemImage: "clock.arrow.circlepath") {
+                showMenu = false
+                withAnimation(AkariMotion.open) { vm.route = .history }
+            }
             MenuRow(title: "Settings", systemImage: "gearshape") {
                 showMenu = false
                 withAnimation(AkariMotion.open) { vm.route = .settings }
@@ -271,6 +276,9 @@ struct NotchRootView: View {
     private var routedContent: some View {
         switch vm.route {
         case .chat:     chatContent
+        case .history:
+            HistoryBody(vm: vm)
+                .padding(.horizontal, contentInset)
         case .settings:
             SettingsBody()
                 .scrollContentBackground(.hidden)   // let the black panel show through the Form
