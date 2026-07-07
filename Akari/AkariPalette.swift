@@ -7,6 +7,10 @@ import SwiftUI
 // 16pt-there) are the #1 visual-jitter smell in productivity apps.
 
 extension Font {
+    /// First-run hero display — the one oversized moment (onboarding welcome /
+    /// "you're set"). Deliberately larger than akariTitle for a real size jump.
+    static let akariDisplay = Font.system(size: 27, weight: .bold, design: .rounded)
+
     /// Hero per-screen header. Used at most once per surface.
     static let akariTitle = Font.system(size: 20, weight: .semibold, design: .rounded)
 
