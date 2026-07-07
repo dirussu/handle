@@ -41,9 +41,15 @@ struct HistoryBody: View {
                             }
                         }
                     }
-                    .padding(.vertical, 4)
+                    // Clear the top fade zone at rest — the first group header
+                    // ("Today") must start below it or it sits permanently dimmed;
+                    // the fade should only touch content that is scrolling out.
+                    .padding(.top, 20)
+                    .padding(.bottom, 16)
                 }
-                .frame(maxHeight: 320)
+                .frame(height: 500)
+                .scrollIndicators(.never)   // uniform: no bars anywhere; the edge fade signals more
+                .scrollEdgeFade()
 
                 clearAllBar
             }
@@ -68,8 +74,7 @@ struct HistoryBody: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.horizontal, AkariSpacing.l)
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 44)
+        .frame(maxWidth: .infinity, minHeight: 500)   // same big panel as the list; hero centers in it
     }
 
     // MARK: - Clear all — quiet until armed, then red.

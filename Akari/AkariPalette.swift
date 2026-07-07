@@ -77,6 +77,47 @@ extension View {
             .overlay { shape.strokeBorder(Color.white.opacity(0.08), lineWidth: 1) }
             .shadow(color: .black.opacity(0.45), radius: 22, x: 0, y: 10)
     }
+
+    /// A soft fade at the top and/or bottom edge of a scroll area, so content
+    /// dissolves into the panel as it meets the header / the notch's bottom edge
+    /// instead of hard-clipping. `top`/`bottom` are the fade heights in points
+    /// (0 disables that edge). Apply to the framed scroll view (mask sizes to it).
+    ///
+    /// The fade is smoothstep-EASED, not linear: a short linear ramp reads as a
+    /// hard smudge (opacity crashes 1→0 in a straight line); easing spends most
+    /// of the distance nearly-opaque and melts out at the very edge, so there is
+    /// no perceptible line where the fade begins.
+    func scrollEdgeFade(top: CGFloat = 24, bottom: CGFloat = 24) -> some View {
+        mask {
+            GeometryReader { geo in
+                let h = max(geo.size.height, 1)
+                LinearGradient(
+                    stops: akariEdgeFadeStops(tf: min(top / h, 0.5), bf: min(bottom / h, 0.5),
+                                              top: top, bottom: bottom),
+                    startPoint: .top, endPoint: .bottom
+                )
+            }
+        }
+    }
+}
+
+/// Gradient stops for `scrollEdgeFade` — hoisted out of the ViewBuilder (which
+/// can't hold imperative statements).
+private func akariEdgeFadeStops(tf: CGFloat, bf: CGFloat, top: CGFloat, bottom: CGFloat) -> [Gradient.Stop] {
+    // smoothstep t²(3−2t), sampled: (position-in-fade, opacity)
+    let curve: [(CGFloat, Double)] = [(0, 0), (0.25, 0.16), (0.5, 0.5), (0.75, 0.84), (1, 1)]
+    var stops: [Gradient.Stop] = []
+    if top > 0 {
+        stops += curve.map { .init(color: .black.opacity($0.1), location: $0.0 * tf) }
+    } else {
+        stops.append(.init(color: .black, location: 0))
+    }
+    if bottom > 0 {
+        stops += curve.reversed().map { .init(color: .black.opacity($0.1), location: 1 - $0.0 * bf) }
+    } else {
+        stops.append(.init(color: .black, location: 1))
+    }
+    return stops
 }
 
 // MARK: - Solid-black buttons (white-only)

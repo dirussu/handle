@@ -109,6 +109,7 @@ struct SettingsBody: View {
             AboutSection()
         }
         .formStyle(.grouped)
+        .scrollIndicators(.never)   // kill the thick AppKit scroller — uniform with the rest
     }
 }
 

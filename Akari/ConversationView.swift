@@ -91,9 +91,11 @@ struct ConversationContent: View {
                 // +1 epsilon so sub-pixel measurement rounding can't make a
                 // snug transcript falsely "overflow" and show a scrollbar.
                 .frame(height: min(conversation.transcriptHeight + 1, maxTranscriptHeight))
-                // Scrollbar appears ONLY when the content actually overflows
-                // (a long chat) — never on a short one.
-                .scrollIndicators(.automatic)
+                // No scrollbar — one rule for every Akari scroll surface (the
+                // Form's thick AppKit scroller clashed with the slim overlays).
+                // The scroll edge fade is the "more content" affordance.
+                .scrollIndicators(.never)
+                .scrollEdgeFade(top: 24, bottom: 0)   // fade under the header; keep the latest reply crisp
                 .onPreferenceChange(TranscriptHeightKey.self) { conversation.transcriptHeight = $0 }
                 .onChange(of: lastMessageText) {
                     withAnimation(.smooth(duration: 0.28)) {

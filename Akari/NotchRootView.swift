@@ -46,7 +46,16 @@ struct NotchRootView: View {
     private var bottomRadius: CGFloat {
         vm.phase == .open ? 34 : min(14, vm.closedSize.height * 0.55)
     }
-    private var surfaceWidth: CGFloat { vm.phase == .open ? vm.openWidth : vm.closedSize.width }
+    /// Pages (Settings / Chats) open WIDER than the chat panel — dense surfaces
+    /// (forms, lists) earn the extra width; chat + onboarding stay compact. The
+    /// width rides the same route animation as the content swap.
+    private var surfaceWidth: CGFloat {
+        guard vm.phase == .open else { return vm.closedSize.width }
+        switch vm.route {
+        case .chat, .onboarding: return vm.openWidth
+        default:                 return 700   // window is 740 — leaves shadow room
+        }
+    }
     /// Open content inset — clears the flared top corners' inset walls
     /// (straight edges sit at x = topRadius) plus breathing room.
     private var contentInset: CGFloat { 32 }
@@ -114,6 +123,15 @@ struct NotchRootView: View {
                 .padding(.top, 5)
             }
         }
+        // Pages (Settings / Chats / Welcome) mirror it on the left: back + title
+        // up in the strip's leading corner, not a header row below it.
+        .overlay(alignment: .topLeading) {
+            if vm.phase == .open && vm.route != .chat {
+                pageHeader
+                    .padding(.leading, contentInset)
+                    .padding(.top, 5)
+            }
+        }
         .background(Color.black)
         // Report the surface's rendered height (= the panel's bottom edge in
         // top-left screen coords) so the pointer can spit out of it.
@@ -175,16 +193,11 @@ struct NotchRootView: View {
 
     private var openBody: some View {
         VStack(spacing: 0) {
-            if vm.route == .chat {
-                // No header row — the buttons live up in the notch strip (overlay
-                // on the surface). The transcript takes the full height; the top
-                // inset just clears the overlaid buttons.
-                routedContent
-                    .padding(.top, chatContentTopInset)
-            } else {
-                topBar
-                routedContent
-            }
+            // No header row on ANY route — the chat buttons (right) and the page
+            // back+title (left) live up in the notch strip as overlays on the
+            // surface. Content takes the full height; the inset clears the strip.
+            routedContent
+                .padding(.top, contentTopInset)
         }
         .padding(.bottom, 14)
         // The ⋯ dropdown floats below the button; a transparent catcher behind
@@ -205,17 +218,17 @@ struct NotchRootView: View {
         .onChange(of: vm.phase) { _, phase in if phase != .open { showMenu = false } }
     }
 
-    /// The chat header buttons overlay the top-trailing corner (up in the notch
-    /// strip). A real hardware notch is tall enough to clear the transcript on its
-    /// own; a short synthesized pill (external display) isn't, so inset the
-    /// content down by the shortfall so it never slides under the buttons.
-    private var chatContentTopInset: CGFloat {
+    /// The header chrome (chat buttons right, page back+title left) overlays the
+    /// notch strip's corners. A real hardware notch is tall enough to clear the
+    /// content on its own; a short synthesized pill (external display) isn't, so
+    /// inset the content down by the shortfall so it never slides under the chrome.
+    private var contentTopInset: CGFloat {
         max(4, 38 - vm.closedSize.height)
     }
 
-    // Header row for the *pages* (Settings / Chats): a back chevron + title.
-    // The chat route has no row — its buttons live up in the notch strip.
-    private var topBar: some View {
+    // Page header (Settings / Chats / Welcome): back chevron + title, overlaid
+    // up in the notch strip's leading corner — the mirror of the chat buttons.
+    private var pageHeader: some View {
         HStack(spacing: AkariSpacing.s) {
             Button { withAnimation(AkariMotion.open) { vm.route = .chat } } label: {
                 Image(systemName: "chevron.left")
@@ -229,11 +242,7 @@ struct NotchRootView: View {
             Text(routeTitle)
                 .font(.akariSection)
                 .foregroundStyle(.primary)
-            Spacer()
         }
-        .frame(height: 28)
-        .padding(.horizontal, contentInset)
-        .padding(.top, 10)
     }
 
     private var routeTitle: String {
@@ -318,7 +327,9 @@ struct NotchRootView: View {
         case .settings:
             SettingsBody()
                 .scrollContentBackground(.hidden)   // let the black panel show through the Form
-                .frame(height: 380)                 // bound it so the Form scrolls inside the notch
+                .contentMargins(.vertical, 14, for: .scrollContent)   // clear the fade zones at rest
+                .frame(height: 560)                 // bound it so the Form scrolls inside the notch
+                .scrollEdgeFade()                   // content dissolves at the header / bottom edge
                 .padding(.horizontal, AkariSpacing.s)
         case .onboarding:
             OnboardingBody(onDone: { withAnimation(AkariMotion.open) { vm.route = .chat } })
