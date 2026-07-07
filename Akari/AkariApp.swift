@@ -778,6 +778,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         var pendingResult = ""
         var lastToolSummary = ""   // fallback shown if the 7B returns an empty final answer — the user always gets feedback
         var terminalDone = false   // set once a consequential action completes (or is declined) → conclude, never re-call
+        var lastCallSignature = "" // repeat guard — see below
         for step in 0..<maxSteps {
             if Task.isCancelled { return }
             let instr = [actionToolInstruction(), pendingResult].filter { !$0.isEmpty }.joined(separator: "\n\n")
@@ -788,6 +789,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 return
             }
             agentLog.info("runToolLoop: step \(step) → tool=\(call.name, privacy: .public) args=\(String(describing: call.args), privacy: .public)")
+
+            // REPEAT GUARD — the 4B sometimes re-issues the IDENTICAL call instead
+            // of answering from its result (observed live: read_calendar_events ×5
+            // straight to the step cap — five chips, one answer). Two identical
+            // consecutive calls = not converging; stop burning steps, hand it the
+            // result it already has, and force the final plain-text answer.
+            let argsSig = (try? JSONSerialization.data(withJSONObject: call.args, options: [.sortedKeys]))
+                .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+            let signature = call.name + "|" + argsSig
+            if signature == lastCallSignature {
+                agentLog.info("runToolLoop: duplicate \(call.name, privacy: .public) with identical args — forcing final answer")
+                let resultContext = lastToolSummary.isEmpty ? "" : toolResultText(call.name, lastToolSummary, isError: false) + "\n\n"
+                _ = await streamOneTurn(in: conversation, instr: resultContext + "[You already ran \(call.name) with exactly that input and have its result above. Do not call any tool again — give your final answer to the user now in plain text.]")
+                return
+            }
+            lastCallSignature = signature
             switch call.name {
             case "recapture_screen":
                 if let cap = await captureCurrentScreen(into: conversation) {

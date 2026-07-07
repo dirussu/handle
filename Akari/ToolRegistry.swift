@@ -144,9 +144,35 @@ enum ToolRegistry {
             default:
                 return ToolResult(content: "The tool '\(name)' isn't wired yet — answer the user directly.", isError: true)
             }
+        } catch let e as DecodingError {
+            // A DecodingError's localizedDescription is the useless "The data
+            // couldn't be read because it is missing." — the 4B can't self-correct
+            // from that (observed live: identical broken run_applescript calls
+            // repeated across days). Name the exact broken argument + the spec.
+            return ToolResult(content: describeDecodingError(e, tool: name), isError: true)
         } catch {
             return ToolResult(content: error.localizedDescription, isError: true)
         }
+    }
+
+    /// Actionable decode-failure text: which argument is missing/mistyped, then
+    /// the tool's one-line argument spec so the retry has the full shape.
+    private static func describeDecodingError(_ e: DecodingError, tool name: String) -> String {
+        let what: String
+        switch e {
+        case .keyNotFound(let key, _):
+            what = "the required argument '\(key.stringValue)' is missing"
+        case .valueNotFound(let type, let ctx):
+            what = "the argument '\(ctx.codingPath.map(\.stringValue).joined(separator: "."))' is null (expected \(type))"
+        case .typeMismatch(let type, let ctx):
+            what = "the argument '\(ctx.codingPath.map(\.stringValue).joined(separator: "."))' has the wrong type (expected \(type))"
+        case .dataCorrupted(let ctx):
+            what = ctx.debugDescription.isEmpty ? "the arguments are not valid JSON" : ctx.debugDescription
+        @unknown default:
+            what = "the arguments could not be parsed"
+        }
+        let spec = tool(named: name).map { promptSpec(for: [$0]) } ?? "- \(name)(…)"
+        return "Bad call: \(what). Call \(name) again with ALL required arguments filled in:\n\(spec)"
     }
 }
 
