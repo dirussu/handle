@@ -215,7 +215,6 @@ struct NotchRootView: View {
         case .chat:       return ""
         case .history:    return "History"
         case .settings:   return "Settings"
-        case .about:      return "About"
         case .onboarding: return "Welcome"
         }
     }
@@ -249,10 +248,6 @@ struct NotchRootView: View {
                 showMenu = false
                 withAnimation(AkariMotion.open) { vm.route = .settings }
             }
-            MenuRow(title: "About Akari", systemImage: "info.circle") {
-                showMenu = false
-                withAnimation(AkariMotion.open) { vm.route = .about }
-            }
             Rectangle()
                 .fill(Color.white.opacity(0.10))
                 .frame(height: 1)
@@ -285,9 +280,6 @@ struct NotchRootView: View {
                 .scrollContentBackground(.hidden)   // let the black panel show through the Form
                 .frame(height: 380)                 // bound it so the Form scrolls inside the notch
                 .padding(.horizontal, AkariSpacing.s)
-        case .about:
-            AboutBody(onDone: { withAnimation(AkariMotion.open) { vm.route = .chat } })
-                .padding(.horizontal, contentInset)
         case .onboarding:
             OnboardingBody(onDone: { withAnimation(AkariMotion.open) { vm.route = .chat } })
                 .padding(.horizontal, contentInset)

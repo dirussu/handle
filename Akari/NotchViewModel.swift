@@ -14,7 +14,6 @@ enum NotchRoute {
     case chat        // the assistant surface (default)
     case history     // saved conversations (reopen / delete)
     case settings
-    case about
     case onboarding  // first-run walk-through (until Onboarding.isDone)
 }
 

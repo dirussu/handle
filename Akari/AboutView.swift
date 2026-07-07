@@ -1,61 +1,49 @@
-import SwiftUI
-import AppKit
+import Foundation
 
-/// About content with no window chrome, so it renders as a page inside the
-/// notch. `onDone` returns to the chat page; Quit always terminates.
-struct AboutBody: View {
-    var onDone: () -> Void
-
-    var body: some View {
-        VStack(spacing: AkariSpacing.l) {
-            if let icon = NSApp.applicationIconImage {
-                Image(nsImage: icon)
-                    .resizable()
-                    .interpolation(.high)
-                    .frame(width: 88, height: 88)
-            }
-
-            VStack(spacing: AkariSpacing.xs) {
-                // Hero — `Akari` is the only display-sized text on this screen.
-                Text("Akari")
-                    .font(.system(size: 26, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.primary)
-                Text("Lights up what you point at.")
-                    .font(.akariBody)
-                    .foregroundStyle(.secondary)
-            }
-
-            VStack(spacing: 2) {
-                Text("Version \(Self.versionString)")
-                    .font(.akariCaption)
-                    .foregroundStyle(.secondary)
-                Text(Self.copyrightString)
-                    .font(.akariCaption)
-                    .foregroundStyle(.tertiary)
-            }
-
-            HStack(spacing: AkariSpacing.m) {
-                Button("Quit Akari") { NSApp.terminate(nil) }
-                    .buttonStyle(.akariSolid)
-
-                Button("Done", action: onDone)
-                    .buttonStyle(.akariSolidProminent)
-                    .keyboardShortcut(.defaultAction)
-            }
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, AkariSpacing.l)
-    }
-
-    private static var versionString: String {
+/// App identity + open-source attributions, surfaced in Settings → About.
+/// (The standalone About page was removed — its Quit duplicated the ⋯ menu and
+/// the brand hero didn't need its own route. The two things worth keeping —
+/// the support-relevant version and the license notices the MIT/Apache
+/// dependencies legally require Akari to ship — now live in Settings.)
+enum AppInfo {
+    static var versionString: String {
         let info = Bundle.main.infoDictionary
         let short = (info?["CFBundleShortVersionString"] as? String) ?? "0.1"
         let build = (info?["CFBundleVersion"] as? String) ?? "0"
         return short == build ? short : "\(short) (\(build))"
     }
 
-    private static var copyrightString: String {
+    static var copyrightString: String {
         let year = Calendar.current.component(.year, from: Date())
         return "© \(year) Dmitrii Russu"
     }
+
+    struct Acknowledgement: Identifiable {
+        let id = UUID()
+        let name: String
+        let license: String
+        let url: URL
+        init(_ name: String, _ license: String, _ url: String) {
+            self.name = name
+            self.license = license
+            self.url = URL(string: url)!
+        }
+    }
+
+    /// The bundled open-source libraries, with their license + source. Tapping a
+    /// row opens the repo, where the full license text lives. (Bundling the full
+    /// texts is the final pre-distribution compliance step.)
+    static let acknowledgements: [Acknowledgement] = [
+        .init("WhisperKit",          "MIT",        "https://github.com/argmaxinc/WhisperKit"),
+        .init("MLX Swift",           "MIT",        "https://github.com/ml-explore/mlx-swift"),
+        .init("MLX Swift Examples",  "MIT",        "https://github.com/ml-explore/mlx-swift-examples"),
+        .init("swift-transformers",  "Apache-2.0", "https://github.com/huggingface/swift-transformers"),
+        .init("swift-jinja",         "Apache-2.0", "https://github.com/huggingface/swift-jinja"),
+        .init("KeyboardShortcuts",   "MIT",        "https://github.com/sindresorhus/KeyboardShortcuts"),
+        .init("swift-markdown-ui",   "MIT",        "https://github.com/gonzalezreal/swift-markdown-ui"),
+        .init("NetworkImage",        "MIT",        "https://github.com/gonzalezreal/NetworkImage"),
+        .init("GzipSwift",           "MIT",        "https://github.com/1024jp/GzipSwift"),
+        .init("swift-collections",   "Apache-2.0", "https://github.com/apple/swift-collections"),
+        .init("swift-numerics",      "Apache-2.0", "https://github.com/apple/swift-numerics"),
+    ]
 }

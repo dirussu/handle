@@ -28,8 +28,31 @@ private struct VoiceReplyToggle: View {
     }
 }
 
+/// A settings section header — a small icon tile + title, replacing the weak
+/// default grouped-form header so the page is scannable at a glance. White-only
+/// (DESIGN.md): the hierarchy comes from the tile + type, never colour.
+private struct SettingsHeader: View {
+    let icon: String
+    let title: String
+    var body: some View {
+        HStack(spacing: AkariSpacing.s) {
+            Image(systemName: icon)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 20, alignment: .center)
+            Text(title)
+                .font(.akariSection)
+                .foregroundStyle(.white)
+                .textCase(nil)
+        }
+        .padding(.bottom, 2)
+    }
+}
+
 /// The settings content (the Form), with no window/panel chrome — so it can
 /// render as a page inside the notch. The notch page wraps it with a header.
+/// Section order is a deliberate narrative: how you drive it → what it does on
+/// its own → what it knows / can touch → privacy + data → advanced.
 struct SettingsBody: View {
     var body: some View {
         Form {
@@ -43,20 +66,21 @@ struct SettingsBody: View {
                 KeyboardShortcuts.Recorder("Hold to talk:", name: .pushToTalk)
                 VoiceReplyToggle()
             } header: {
-                Text("Hotkeys")
+                SettingsHeader(icon: "keyboard", title: "Hotkeys")
             } footer: {
                 Text("Double-tap ⌥ captures the whole screen. The region chord opens a drag-to-select overlay. Hold the talk key and speak a command — it's transcribed on-device (nothing audible leaves your Mac) and run like a typed one.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
-            WorkspaceSection()
             AutomationsSection()
-            MemorySection()
-            PermissionsSection()
             ActivitySection()
+            MemorySection()
+            WorkspaceSection()
+            PermissionsSection()
             StorageSection()
             PowerUserSection()
+            AboutSection()
         }
         .formStyle(.grouped)
     }
@@ -111,7 +135,7 @@ private struct AutomationsSection: View {
                 }
             }
         } header: {
-            Text("Automations")
+            SettingsHeader(icon: "clock.arrow.circlepath", title: "Automations")
         } footer: {
             Text("Automations run on their own — on a schedule or when a watched event happens (like a file appearing in a folder). Approved once when you saved them, recorded in Activity each time they fire. Toggle off to pause, or delete.")
                 .font(.caption).foregroundStyle(.secondary)
@@ -180,7 +204,7 @@ private struct PermissionsSection: View {
                 }
             }
         } header: {
-            Text("Permissions")
+            SettingsHeader(icon: "lock.shield", title: "Permissions")
         } footer: {
             Text("Akari asks for each permission the first time a feature needs it — and when you save an automation, it asks to control the target apps right away, so a scheduled run never stalls on a hidden dialog. Everything stays on this Mac.")
                 .font(.caption).foregroundStyle(.secondary)
@@ -461,7 +485,7 @@ private struct MemorySection: View {
                 .tint(confirmWipe ? .red : nil)
             }
         } header: {
-            Text("Memory")
+            SettingsHeader(icon: "brain", title: "Memory")
         } footer: {
             Text("Facts you tell Akari to remember. The relevant ones are added to the prompt each turn. Stored locally in memory.db — never leaves your Mac.")
                 .font(.caption).foregroundStyle(.secondary)
@@ -516,7 +540,7 @@ private struct ActivitySection: View {
                 Spacer()
             }
         } header: {
-            Text("Activity")
+            SettingsHeader(icon: "list.bullet.rectangle", title: "Activity")
         } footer: {
             Text("Every tool Akari runs is recorded locally to audit.jsonl and never leaves your Mac. The 20 most recent are shown.")
                 .font(.caption).foregroundStyle(.secondary)
@@ -594,7 +618,7 @@ private struct StorageSection: View {
                 Spacer()
             }
         } header: {
-            Text("Model storage")
+            SettingsHeader(icon: "internaldrive", title: "Model storage")
         } footer: {
             Text("The AI models live here (moveable to an external drive). A move takes effect the next time a model loads — quit and reopen Akari after moving.")
                 .font(.caption).foregroundStyle(.secondary)
@@ -634,7 +658,7 @@ private struct PowerUserSection: View {
                     ShellTool.shared.setEnabled(newValue)
                 }
         } header: {
-            Text("Power user")
+            SettingsHeader(icon: "terminal", title: "Power user")
         } footer: {
             Text("With the shell tool on, Akari can run commands in /bin/zsh — npm, pip, brew, git, build scripts, etc. Every command shown to you for confirmation, scoped to allowed folders, with a 60s timeout. Off by default. Treat this like giving Akari a terminal.")
                 .font(.caption)
@@ -662,7 +686,7 @@ private struct WorkspaceSection: View {
                 Spacer()
             }
         } header: {
-            Text("Workspace")
+            SettingsHeader(icon: "folder", title: "Workspace")
         } footer: {
             Text("Akari has standing read/write consent for this folder. File operations inside it run without per-call confirmation; destructive ops (delete, move) always confirm. Outside this folder, file operations are refused.")
                 .font(.caption)
@@ -691,6 +715,46 @@ private struct WorkspaceSection: View {
             NSWorkspace.shared.activateFileViewerSelecting([url])
         } catch {
             NSSound.beep()
+        }
+    }
+}
+
+/// App version + copyright + open-source acknowledgements — folded in from the
+/// removed standalone About page. The licenses live here because the bundled
+/// MIT/Apache dependencies require their notices to ship with the app.
+private struct AboutSection: View {
+    @State private var showLicenses = false
+
+    var body: some View {
+        Section {
+            LabeledContent("Version") {
+                Text(AppInfo.versionString).foregroundStyle(.secondary)
+            }
+            DisclosureGroup(isExpanded: $showLicenses) {
+                ForEach(AppInfo.acknowledgements) { lib in
+                    Button {
+                        NSWorkspace.shared.open(lib.url)
+                    } label: {
+                        HStack(spacing: 8) {
+                            Text(lib.name).font(.body)
+                            Spacer()
+                            Text(lib.license)
+                                .font(.caption).foregroundStyle(.secondary)
+                            Image(systemName: "arrow.up.right")
+                                .font(.system(size: 10)).foregroundStyle(.tertiary)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            } label: {
+                Text("Acknowledgements").font(.body)
+            }
+        } header: {
+            SettingsHeader(icon: "info.circle", title: "About")
+        } footer: {
+            Text("Akari is built on open-source software — thank you to these projects. \(AppInfo.copyrightString).")
+                .font(.caption).foregroundStyle(.secondary)
         }
     }
 }
