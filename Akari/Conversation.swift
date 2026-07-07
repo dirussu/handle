@@ -270,6 +270,22 @@ final class Conversation {
         isAwaitingResponse = false
     }
 
+    /// Stop any in-progress stream — finalize the streaming assistant message (or
+    /// drop it if nothing had arrived yet) and clear the awaiting flag. Idempotent:
+    /// called on EVERY loop exit so a cancelled turn never leaves the panel stuck
+    /// "thinking," and directly by the user's Stop action.
+    func stopStreaming() {
+        if let i = messages.lastIndex(where: { $0.isStreaming }) {
+            var copy = messages
+            copy[i].isStreaming = false
+            if copy[i].text.isEmpty && copy[i].toolUses.isEmpty {
+                copy.remove(at: i)   // nothing streamed in yet — no blank bubble
+            }
+            messages = copy
+        }
+        isAwaitingResponse = false
+    }
+
     /// Append a complete, non-streamed assistant message. Used by the agent loop
     /// for turns that were buffered off-screen (so a raw tool-call payload never
     /// shows): once the final plain-text answer is known, it's committed here.

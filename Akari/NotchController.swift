@@ -76,6 +76,10 @@ final class NotchController {
     private var working = false
     /// Wired once by the app at launch; survives every present()/rebuild().
     var onOpenSaved: (String) -> Void = { _ in }
+    /// New chat — the app swaps in a fresh blank conversation and opens it.
+    var onNewChat: () -> Void = {}
+    /// Stop — cancel the running turn (send button becomes Stop while working).
+    var onStop: () -> Void = {}
 
     // Pending completion notifications (the pill below the closed notch).
     private var notifications: [AkariNotification] = []
@@ -154,6 +158,8 @@ final class NotchController {
         vm.onAddPDF = onAddPDF
         vm.onClose = { [weak self, weak notch] in self?.close(notch) }
         vm.onOpenSaved = { [weak self] id in self?.onOpenSaved(id) }
+        vm.onNewChat = { [weak self] in self?.onNewChat() }
+        vm.onStop = { [weak self] in self?.onStop() }
         vm.isWorking = working
         vm.notifications = notifications
     }

@@ -69,10 +69,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         // closed pill is resident from the first frame.
         NotchController.shared.install()
 
-        // History page → reopen a saved conversation (text-only, continuable).
+        // Chats page → reopen a saved conversation (text-only, continuable).
         NotchController.shared.onOpenSaved = { [weak self] id in
             Task { @MainActor in await self?.openSavedConversation(id: id) }
         }
+        // New chat → swap in a fresh blank conversation, opened + ready to type.
+        NotchController.shared.onNewChat = { [weak self] in self?.startNewChat() }
+        // Stop → cancel the running turn (the send button becomes Stop while working).
+        NotchController.shared.onStop = { [weak self] in self?.stopGeneration() }
 
         // Pre-wire a fresh text-only "Ask" conversation (no capture) so the
         // input bar is ready the instant the user opens the notch — chat is
@@ -569,11 +573,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         presentConversation(convo)
     }
 
+    /// New chat → a clean, blank text-first conversation (no capture), opened and
+    /// ready to type. The prior conversation is already persisted (it lands in
+    /// Chats), so this is a safe swap to a clean slate — and it lets you ask
+    /// Akari something that isn't about your screen.
+    private func startNewChat() {
+        let convo = Conversation(chatWithApp: "")
+        activeConversation = convo
+        presentConversation(convo)
+    }
+
+    /// User tapped Stop — cancel the running turn. The loop checks Task.isCancelled
+    /// at each step and bails; runToolLoop's defer finalizes the streaming message
+    /// (conversation.stopStreaming), so the panel unsticks cleanly.
+    private func stopGeneration() {
+        activeTask?.cancel()
+        activeTask = nil
+    }
+
     private func presentConversation(_ conversation: Conversation, andOpen: Bool = true) {
         NotchController.shared.present(
             conversation: conversation,
             onSubmit: { [weak self] text in
-                Task { @MainActor in
+                guard let self else { return }
+                // Track this turn as the active task so the Stop button can cancel it
+                // (the loop checks Task.isCancelled at each step; its defer cleans up).
+                self.activeTask?.cancel()
+                self.activeTask = Task { @MainActor [weak self] in
+                    guard let self else { return }
                     let attachedPDF = conversation.pendingPDF
                     conversation.clearPendingPDF()
 
@@ -583,10 +610,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                         // Ambient sight: route to the visible screen, a specific
                         // (even occluded) window, or a pure text turn — and hand
                         // the model a manifest of what's open. See handleAmbientTurn.
-                        await self?.handleAmbientTurn(text: text, in: conversation)
+                        await self.handleAmbientTurn(text: text, in: conversation)
                     }
 
-                    await self?.runToolLoop(in: conversation, isInitial: false, action: conversation.initialAction)
+                    await self.runToolLoop(in: conversation, isInitial: false, action: conversation.initialAction)
                 }
             },
             onAddPDF: { [weak self] in
@@ -647,6 +674,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         defer {
             isAgentRunning = false
             NotchController.shared.setWorking(false)
+            conversation.stopStreaming()   // unstick the panel on ANY exit — incl. a user-cancelled turn
             // Persist the transcript on EVERY exit path (text-only snapshot; the
             // loop is the single choke point all turns — typed, voice, capture —
             // flow through).

@@ -19,8 +19,10 @@ struct ConversationContent: View {
     let onSubmit: (String) -> Void
     let onAddPDF: () -> Void
     let onClose: () -> Void
+    let onStop: () -> Void
 
     @FocusState private var inputFocused: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduce
     /// The transcript sizes to its content (snug) up to `maxTranscriptHeight`,
     /// then scrolls. The measured height is cached on the conversation
     /// (`conversation.transcriptHeight`) so it survives close/reopen — no
@@ -41,7 +43,7 @@ struct ConversationContent: View {
             // the first message lands and the transcript takes over.
             if conversation.visibleMessages.isEmpty {
                 greeting
-                    .transition(.opacity.combined(with: .move(edge: .top)))
+                    .transition(reduce ? .opacity : .opacity.combined(with: .move(edge: .top)))
             }
 
             ScrollViewReader { proxy in
@@ -50,7 +52,7 @@ struct ConversationContent: View {
                         ForEach(Array(conversation.visibleMessages)) { msg in
                             messageView(msg)
                                 .id(msg.id)
-                                .transition(.asymmetric(
+                                .transition(reduce ? .opacity : .asymmetric(
                                     insertion: .move(edge: .bottom).combined(with: .opacity),
                                     removal: .opacity
                                 ))
@@ -68,7 +70,7 @@ struct ConversationContent: View {
                             }
                             .padding(AkariSpacing.m)
                             .background(Color.red.opacity(0.10), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                            .transition(.opacity.combined(with: .move(edge: .top)))
+                            .transition(reduce ? .opacity : .opacity.combined(with: .move(edge: .top)))
                         }
                         // Anchor to scroll to.
                         Color.clear.frame(height: 1).id("bottom")
@@ -98,7 +100,7 @@ struct ConversationContent: View {
             ZStack {
                 if let confirmation = conversation.pendingConfirmation {
                     ConfirmationCard(request: confirmation)
-                        .transition(.scale(scale: 0.96).combined(with: .opacity))
+                        .transition(reduce ? .opacity : .scale(scale: 0.96).combined(with: .opacity))
                 } else {
                     inputBar
                         .transition(.opacity)
@@ -109,6 +111,9 @@ struct ConversationContent: View {
         .animation(.smooth(duration: 0.3), value: conversation.visibleMessages.isEmpty)
         .tint(.white)   // white-only accent everywhere (caret, selection, links)
         .onAppear { inputFocused = true }
+        // New chat (or reopening one) swaps the conversation in place without a
+        // re-appear, so re-focus the input on identity change — type immediately.
+        .onChange(of: conversation.persistentID) { inputFocused = true }
     }
 
     /// Auto-scroll trigger. Fires only when a new message arrives or a new tool
@@ -137,7 +142,7 @@ struct ConversationContent: View {
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.bottom, AkariSpacing.xs)
+        .padding(.top, 40)   // breathing room above the greeting; it sits close to the input below
     }
 
     /// Time-of-day greeting, resolved on the user's machine.
@@ -246,21 +251,35 @@ struct ConversationContent: View {
                     .disabled(conversation.isAwaitingResponse)
                     .onSubmit { submit() }
 
-                // White-only send button per DESIGN.md: white-fill capsule
-                // when armed (this IS the action), faint neutral glass idle.
-                Button(action: submit) {
-                    Image(systemName: conversation.isAwaitingResponse ? "circle.dotted" : "arrow.up")
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundStyle(canSubmit ? Color.black : Color.secondary)
-                        .frame(width: 30, height: 30)
-                        .background(
-                            Circle().fill(canSubmit ? Color.white : Color.white.opacity(0.10))
-                        )
-                        .symbolEffect(.pulse, isActive: conversation.isAwaitingResponse)
+                // White-only send button per DESIGN.md: white-fill circle when
+                // armed (this IS the action), faint idle. While Akari works it
+                // becomes Stop — tap to cancel the running turn.
+                Group {
+                    if conversation.isAwaitingResponse {
+                        Button(action: onStop) {
+                            Image(systemName: "stop.fill")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundStyle(.white)
+                                .frame(width: 30, height: 30)
+                                .background(Circle().fill(Color.white.opacity(0.14)))
+                                .contentShape(Circle())
+                        }
+                        .buttonStyle(.plain)
+                        .help("Stop")
+                    } else {
+                        Button(action: submit) {
+                            Image(systemName: "arrow.up")
+                                .font(.system(size: 13, weight: .bold))
+                                .foregroundStyle(canSubmit ? Color.black : Color.secondary)
+                                .frame(width: 30, height: 30)
+                                .background(Circle().fill(canSubmit ? Color.white : Color.white.opacity(0.10)))
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(!canSubmit)
+                        .keyboardShortcut(.return, modifiers: [])
+                    }
                 }
-                .buttonStyle(.plain)
-                .disabled(!canSubmit)
-                .keyboardShortcut(.return, modifiers: [])
+                .animation(.smooth(duration: 0.22), value: conversation.isAwaitingResponse)
                 .animation(.smooth(duration: 0.22), value: canSubmit)
             }
         }
@@ -345,15 +364,17 @@ struct ConversationContent: View {
 /// and unobtrusive next to the comet already orbiting the input bar.
 private struct ThinkingLabel: View {
     let text: String
+    @Environment(\.accessibilityReduceMotion) private var reduce
     @State private var breathing = false
 
     var body: some View {
         Text(text)
             .font(.akariBody)
             .foregroundStyle(.white)
-            .opacity(breathing ? 0.85 : 0.35)
+            .opacity(reduce ? 0.7 : (breathing ? 0.85 : 0.35))
             .frame(maxWidth: .infinity, alignment: .leading)
             .onAppear {
+                guard !reduce else { return }   // no forever-breathing under reduce-motion
                 withAnimation(.easeInOut(duration: 0.95).repeatForever(autoreverses: true)) {
                     breathing = true
                 }
@@ -433,6 +454,9 @@ struct ToolUseCard: View {
         case "web_search":            return "magnifyingglass.circle"
         case "run_applescript":       return "applescript"
         case "run_shell":             return "terminal"
+        case "code_execution":        return "curlybraces"
+        case "list_shortcuts":        return "square.grid.2x2"
+        case "run_shortcut":          return "play.square"
         default:                       return "wrench.and.screwdriver"
         }
     }
@@ -520,6 +544,15 @@ struct ToolUseCard: View {
                 return "Shell: \(short)"
             }
             return "Run shell command"
+        case "code_execution":
+            return "Run code"
+        case "list_shortcuts":
+            return "List shortcuts"
+        case "run_shortcut":
+            if let name = inputField("name"), !name.isEmpty {
+                return "Run shortcut: \(name)"
+            }
+            return "Run shortcut"
         default:
             return toolUse.name
         }

@@ -1,9 +1,10 @@
 import SwiftUI
 
-/// The History page inside the notch panel — saved conversations, newest first.
-/// Tapping a row reopens it as a continuable text conversation (via
-/// `vm.onOpenSaved`); the trash icon deletes one; Clear All needs a second
-/// click to confirm (destructive, so no single-click wipe).
+/// The History page inside the notch panel — saved conversations, newest first,
+/// grouped by WHEN they happened (Today / Yesterday / …) so a long list stays
+/// scannable instead of one flat scroll. Tapping a row reopens it as a
+/// continuable text conversation (via `vm.onOpenSaved`); the trash icon deletes
+/// one; Clear All needs a second click to confirm (destructive, no single-click wipe).
 struct HistoryBody: View {
     @ObservedObject var vm: NotchViewModel
     @State private var rows: [ConversationSummary] = []
@@ -11,35 +12,76 @@ struct HistoryBody: View {
     @State private var confirmClear = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: AkariSpacing.s) {
             if rows.isEmpty && loaded {
-                Text("No saved conversations yet")
-                    .font(.akariBody)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 24)
+                emptyState
             } else {
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 2) {
-                        ForEach(rows) { row in
-                            HistoryRow(summary: row) {
-                                vm.onOpenSaved(row.id)
-                                withAnimation(AkariMotion.open) { vm.route = .chat }
-                            } onDelete: {
-                                Task {
-                                    await ConversationStore.shared.delete(id: row.id)
-                                    await reload()
+                    VStack(alignment: .leading, spacing: AkariSpacing.l) {
+                        ForEach(groups, id: \.label) { group in
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(group.label)
+                                    .font(.akariMicro)
+                                    .textCase(.uppercase)
+                                    .tracking(1.2)
+                                    .foregroundStyle(.white.opacity(0.4))
+                                    .padding(.horizontal, 8)
+                                    .padding(.bottom, 2)
+                                ForEach(group.rows) { row in
+                                    HistoryRow(summary: row) {
+                                        vm.onOpenSaved(row.id)
+                                        withAnimation(AkariMotion.open) { vm.route = .chat }
+                                    } onDelete: {
+                                        Task {
+                                            await ConversationStore.shared.delete(id: row.id)
+                                            await reload()
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
+                    .padding(.vertical, 4)
                 }
                 .frame(maxHeight: 320)
 
-                Rectangle()
-                    .fill(Color.white.opacity(0.10))
-                    .frame(height: 1)
-                    .padding(.vertical, 4)
+                clearAllBar
+            }
+        }
+        .task { await reload() }
+    }
+
+    // MARK: - Empty state — an inviting hero, not a bare line of text.
+
+    private var emptyState: some View {
+        VStack(spacing: AkariSpacing.m) {
+            Image(systemName: "clock.arrow.circlepath")
+                .font(.system(size: 30, weight: .regular))
+                .foregroundStyle(.white.opacity(0.22))
+            Text("No conversations yet")
+                .font(.akariTitle)
+                .foregroundStyle(.white.opacity(0.9))
+            Text("Your chats with Akari land here — reopen or delete any of them.")
+                .font(.akariBody)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, AkariSpacing.l)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 44)
+    }
+
+    // MARK: - Clear all — quiet until armed, then red.
+
+    private var clearAllBar: some View {
+        VStack(spacing: 0) {
+            Rectangle()
+                .fill(Color.white.opacity(0.10))
+                .frame(height: 1)
+                .padding(.vertical, 4)
+            HStack {
+                Spacer()
                 Button {
                     if confirmClear {
                         Task {
@@ -52,8 +94,8 @@ struct HistoryBody: View {
                     }
                 } label: {
                     Text(confirmClear ? "Really clear all? Click again" : "Clear All")
-                        .font(.akariBody)
-                        .foregroundStyle(confirmClear ? .red : .secondary)
+                        .font(.akariCaption)
+                        .foregroundStyle(confirmClear ? .red : .white.opacity(0.5))
                         .padding(.horizontal, 8)
                         .padding(.vertical, 5)
                         .contentShape(Rectangle())
@@ -61,7 +103,28 @@ struct HistoryBody: View {
                 .buttonStyle(.plain)
             }
         }
-        .task { await reload() }
+    }
+
+    // MARK: - Time grouping
+
+    private struct DateGroup { let label: String; let rows: [ConversationSummary] }
+
+    /// Bucket the (already newest-first) rows into Today / Yesterday / Previous 7
+    /// Days / Earlier, dropping any empty bucket. Calendar-day based, so "1 day"
+    /// means yesterday regardless of the clock time.
+    private var groups: [DateGroup] {
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        let labels = ["Today", "Yesterday", "Previous 7 Days", "Earlier"]
+        var buckets: [[ConversationSummary]] = [[], [], [], []]
+        for r in rows {
+            let days = cal.dateComponents([.day], from: cal.startOfDay(for: r.updatedAt), to: today).day ?? 0
+            let i = days <= 0 ? 0 : (days == 1 ? 1 : (days < 7 ? 2 : 3))
+            buckets[i].append(r)
+        }
+        return labels.enumerated().compactMap { i, label in
+            buckets[i].isEmpty ? nil : DateGroup(label: label, rows: buckets[i])
+        }
     }
 
     private func reload() async {
@@ -109,7 +172,7 @@ private struct HistoryRow: View {
                 }
             }
             .padding(.horizontal, 8)
-            .padding(.vertical, 6)
+            .padding(.vertical, 7)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(hovering ? Color.white.opacity(0.08) : Color.clear,
                         in: RoundedRectangle(cornerRadius: 8, style: .continuous))

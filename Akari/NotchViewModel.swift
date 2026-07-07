@@ -45,8 +45,12 @@ final class NotchViewModel: ObservableObject {
     var onSubmit: (String) -> Void = { _ in }
     var onAddPDF: () -> Void = {}
     var onClose: () -> Void = {}
-    /// Reopen a saved conversation by its persistent id (History page rows).
+    /// Reopen a saved conversation by its persistent id (Chats page rows).
     var onOpenSaved: (String) -> Void = { _ in }
+    /// Start a fresh, blank text-first conversation (the New-chat action).
+    var onNewChat: () -> Void = {}
+    /// Stop the running turn (the send button becomes Stop while Akari works).
+    var onStop: () -> Void = {}
 
     /// The hardware (or synthesized) notch dimensions for the closed pill.
     let closedSize: CGSize

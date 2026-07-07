@@ -101,6 +101,19 @@ struct NotchRootView: View {
         // so the panel is snug — no empty void — and grows as the answer
         // streams. The morph rides the spring below.
         .frame(width: surfaceWidth)
+        // The chat header buttons (New chat + ⋯) sit UP in the notch strip's
+        // trailing corner — not a header row — so the transcript gets the full
+        // height. (Content clears them via `chatContentTopInset`.)
+        .overlay(alignment: .topTrailing) {
+            if vm.phase == .open && vm.route == .chat {
+                HStack(spacing: AkariSpacing.s) {
+                    newChatButton
+                    ellipsisButton
+                }
+                .padding(.trailing, contentInset)
+                .padding(.top, 5)
+            }
+        }
         .background(Color.black)
         // Report the surface's rendered height (= the panel's bottom edge in
         // top-left screen coords) so the pointer can spit out of it.
@@ -162,8 +175,16 @@ struct NotchRootView: View {
 
     private var openBody: some View {
         VStack(spacing: 0) {
-            topBar
-            routedContent
+            if vm.route == .chat {
+                // No header row — the buttons live up in the notch strip (overlay
+                // on the surface). The transcript takes the full height; the top
+                // inset just clears the overlaid buttons.
+                routedContent
+                    .padding(.top, chatContentTopInset)
+            } else {
+                topBar
+                routedContent
+            }
         }
         .padding(.bottom, 14)
         // The ⋯ dropdown floats below the button; a transparent catcher behind
@@ -175,7 +196,7 @@ struct NotchRootView: View {
                         .contentShape(Rectangle())
                         .onTapGesture { withAnimation(AkariMotion.interactive) { showMenu = false } }
                     menuDropdown
-                        .padding(.top, 40)
+                        .padding(.top, 4)
                         .padding(.trailing, contentInset)
                         .transition(.scale(scale: 0.92, anchor: .topTrailing).combined(with: .opacity))
                 }
@@ -184,26 +205,31 @@ struct NotchRootView: View {
         .onChange(of: vm.phase) { _, phase in if phase != .open { showMenu = false } }
     }
 
+    /// The chat header buttons overlay the top-trailing corner (up in the notch
+    /// strip). A real hardware notch is tall enough to clear the transcript on its
+    /// own; a short synthesized pill (external display) isn't, so inset the
+    /// content down by the shortfall so it never slides under the buttons.
+    private var chatContentTopInset: CGFloat {
+        max(4, 38 - vm.closedSize.height)
+    }
+
+    // Header row for the *pages* (Settings / Chats): a back chevron + title.
+    // The chat route has no row — its buttons live up in the notch strip.
     private var topBar: some View {
         HStack(spacing: AkariSpacing.s) {
-            if vm.route != .chat {
-                Button { withAnimation(AkariMotion.open) { vm.route = .chat } } label: {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 26, height: 26)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help("Back")
-                Text(routeTitle)
-                    .font(.akariSection)
-                    .foregroundStyle(.primary)
+            Button { withAnimation(AkariMotion.open) { vm.route = .chat } } label: {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 26, height: 26)
+                    .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+            .help("Back")
+            Text(routeTitle)
+                .font(.akariSection)
+                .foregroundStyle(.primary)
             Spacer()
-            if vm.route == .chat {
-                ellipsisButton
-            }
         }
         .frame(height: 28)
         .padding(.horizontal, contentInset)
@@ -213,10 +239,24 @@ struct NotchRootView: View {
     private var routeTitle: String {
         switch vm.route {
         case .chat:       return ""
-        case .history:    return "History"
+        case .history:    return "Chats"
         case .settings:   return "Settings"
         case .onboarding: return "Welcome"
         }
+    }
+
+    /// New chat — swap in a clean, blank conversation (a fresh slate; the old
+    /// one is saved to Chats). The one-tap sibling of the ⋯ → New chat item.
+    private var newChatButton: some View {
+        Button { vm.onNewChat() } label: {
+            Image(systemName: "square.and.pencil")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 26, height: 26)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("New chat")
     }
 
     /// The ⋯ button — toggles the custom dropdown. The single entry point to
@@ -240,7 +280,7 @@ struct NotchRootView: View {
     /// (black fill, white hairline, white-only rows that highlight on hover).
     private var menuDropdown: some View {
         VStack(alignment: .leading, spacing: 2) {
-            MenuRow(title: "History", systemImage: "clock.arrow.circlepath") {
+            MenuRow(title: "Chats", systemImage: "bubble.left.and.bubble.right") {
                 showMenu = false
                 withAnimation(AkariMotion.open) { vm.route = .history }
             }
@@ -293,7 +333,8 @@ struct NotchRootView: View {
                 conversation: convo,
                 onSubmit: vm.onSubmit,
                 onAddPDF: vm.onAddPDF,
-                onClose: vm.onClose
+                onClose: vm.onClose,
+                onStop: vm.onStop
             )
             // Horizontal inset must clear the notch shape's inset walls
             // (the flared top corners push the straight edges in by
