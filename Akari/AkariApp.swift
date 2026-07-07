@@ -19,7 +19,7 @@ struct AkariApp: App {
     }
 }
 
-final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate {
     private var hotkeyMonitor: HotkeyMonitor?
     private var isPresentingOverlay = false
 
@@ -85,9 +85,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         activeConversation = chat
         presentConversation(chat, andOpen: false)
 
-        UNUserNotificationCenter.current().delegate = self
-        Task { await NotificationsService.shared.requestAuthorization() }
-
         // First run: open the panel on the onboarding walk-through (hardware
         // check → staged permissions → model disclosure). Repeats each launch
         // until completed.
@@ -99,31 +96,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         print("[Akari] Ready. Hover the notch, or double-tap ⌥ to capture.")
     }
 
-    // MARK: - UNUserNotificationCenterDelegate
-
-    func userNotificationCenter(
-        _ center: UNUserNotificationCenter,
-        willPresent notification: UNNotification,
-        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
-    ) {
-        // Show banner + sound even when our app is foreground.
-        completionHandler([.banner, .sound])
-    }
-
-    func userNotificationCenter(
-        _ center: UNUserNotificationCenter,
-        didReceive response: UNNotificationResponse,
-        withCompletionHandler completionHandler: @escaping () -> Void
-    ) {
-        Task { @MainActor in
-            // Tapping the "task complete" notification opens the notch on the
-            // active conversation.
-            if let conversation = self.activeConversation {
-                self.presentConversation(conversation)
-            }
-            completionHandler()
-        }
-    }
+    // System (UNUserNotification) notifications REMOVED (founder call, 2026-07-07):
+    // every completion signal goes through Akari's own notification center — the
+    // pill + result cards under the notch. One interface, no duplicate banners,
+    // and no Notifications permission needed.
 
     // MARK: - Hotkey
 
@@ -683,8 +659,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             }
             if !NotchController.shared.isPanelOpen {
                 let last = conversation.visibleMessages.last
-                let body = last.flatMap { $0.text.isEmpty ? nil : String($0.text.prefix(140)) } ?? "Task complete."
-                NotificationsService.shared.notifyTaskComplete(body: body)
                 NotchController.shared.notifyResult((last?.text).map { String($0.prefix(800)) } ?? "Done")
             }
         }
@@ -1531,7 +1505,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             Task { @MainActor in
                 await self?.runAutomation(automation, extra: extra)
                 if !NotchController.shared.isPanelOpen {
-                    NotificationsService.shared.notifyTaskComplete(body: "Ran automation: \(automation.name)")
+                    NotchController.shared.notifyResult("Ran automation: \(automation.name)")
                 }
             }
         }
@@ -1596,7 +1570,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             AutomationStore.shared.replace(updated)
             agentLog.info("scheduler: firing \"\(a.name, privacy: .public)\" (\(s.describe, privacy: .public))")
             await runAutomation(a)
-            if !NotchController.shared.isPanelOpen { NotificationsService.shared.notifyTaskComplete(body: "Ran automation: \(a.name)") }
+            if !NotchController.shared.isPanelOpen { NotchController.shared.notifyResult("Ran automation: \(a.name)") }
         }
     }
 

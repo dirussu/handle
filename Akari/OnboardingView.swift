@@ -373,11 +373,8 @@ private struct PermissionsFlow: View {
                  refresh: { PermissionsService.reminders() },
                  request: { PermissionsService.requestReminders() },
                  settingsURL: PermissionsService.settingsURL(pane: "Privacy_Reminders")),
-            Perm(id: "not", icon: "bell.badge", name: "Notifications",
-                 why: "So a task running in the background can tell you the moment it's done.",
-                 refresh: { await PermissionsService.notifications() },
-                 request: { PermissionsService.requestNotifications() },
-                 settingsURL: PermissionsService.notificationsSettingsURL),
+            // (No Notifications card: Akari's own notch notification center is the
+            // only completion surface — system notifications were removed.)
         ]
     }
 }

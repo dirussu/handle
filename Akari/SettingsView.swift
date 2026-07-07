@@ -225,10 +225,6 @@ private struct PermissionsSection: View {
                             Button("Open Settings") {
                                 NSWorkspace.shared.open(PermissionsService.settingsURL(pane: pane))
                             }.buttonStyle(.akariSolid)
-                        } else if p.id == "not" {
-                            Button("Open Settings") {
-                                NSWorkspace.shared.open(PermissionsService.notificationsSettingsURL)
-                            }.buttonStyle(.akariSolid)
                         }
                     }
                 }
@@ -272,9 +268,8 @@ private struct PermissionsSection: View {
             Item(id: "loc", icon: "location", name: "Location (Wi-Fi triggers)",
                  status: PermissionsService.location(), pane: "Privacy_LocationServices",
                  request: { PermissionsService.requestLocation() }),
-            Item(id: "not", icon: "bell.badge", name: "Notifications",
-                 status: await PermissionsService.notifications(), pane: nil,
-                 request: { PermissionsService.requestNotifications() }),
+            // (No Notifications row — system notifications removed; the notch pill
+            // is Akari's only completion surface and needs no permission.)
         ]
         // Per-app Automation consent for the apps saved automations actually control.
         var targets: [String] = []

@@ -1,6 +1,12 @@
 import AppKit
 import UserNotifications
 
+/// UNUSED as of 2026-07-07 (founder call): system notifications were removed —
+/// Akari's own notch notification center (the pill + result cards) is the ONLY
+/// completion surface, so nothing calls this anymore and no Notifications
+/// permission is requested. Kept compiling to avoid pbxproj surgery; delete the
+/// file in a cleanup pass.
+///
 /// Posts macOS notifications when a long-running task completes while the chat
 /// panel is dismissed. Tap the notification to reopen the chat.
 @MainActor
