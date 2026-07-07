@@ -168,11 +168,11 @@ private struct HistoryRow: View {
                     Button(action: onDelete) {
                         Image(systemName: "trash")
                             .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
                             .frame(width: 22, height: 22)
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    .akariIconHover()
                     .help("Delete")
                 }
             }

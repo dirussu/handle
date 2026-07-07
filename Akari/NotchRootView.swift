@@ -233,11 +233,11 @@ struct NotchRootView: View {
             Button { withAnimation(AkariMotion.open) { vm.route = .chat } } label: {
                 Image(systemName: "chevron.left")
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.secondary)
                     .frame(width: 26, height: 26)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .akariIconHover()
             .help("Back")
             Text(routeTitle)
                 .font(.akariSection)
@@ -260,11 +260,11 @@ struct NotchRootView: View {
         Button { vm.onNewChat() } label: {
             Image(systemName: "square.and.pencil")
                 .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(.secondary)
                 .frame(width: 26, height: 26)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .akariIconHover()
         .help("New chat")
     }
 
@@ -276,11 +276,11 @@ struct NotchRootView: View {
         } label: {
             Image(systemName: "ellipsis")
                 .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(showMenu ? .primary : .secondary)
                 .frame(width: 26, height: 26)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .akariIconHover(idle: showMenu ? Color.white : Color(nsColor: .secondaryLabelColor))
         .help("More")
     }
 
@@ -565,11 +565,11 @@ private struct NotificationCard: View {
                 Button(action: onOpen) {
                     Image(systemName: "arrow.up.right")
                         .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.6))
                         .frame(width: 18, height: 18)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .akariIconHover(idle: .white.opacity(0.6))
             }
             Text(note.text.isEmpty ? "Done" : note.text)
                 .font(.system(size: 12))

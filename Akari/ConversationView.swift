@@ -241,11 +241,11 @@ struct ConversationContent: View {
                 Button(action: onAddPDF) {
                     Image(systemName: "paperclip")
                         .font(.system(size: 15, weight: .medium))
-                        .foregroundStyle(.secondary)
                         .frame(width: 20, height: 20)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .akariIconHover()
                 .help("Attach a PDF")
                 .disabled(conversation.isAwaitingResponse)
 
@@ -347,11 +347,11 @@ struct ConversationContent: View {
         Button(action: action) {
             Image(systemName: "xmark")
                 .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(.secondary)
                 .frame(width: 18, height: 18)
                 .background(Color.akariChip, in: Circle())
         }
         .buttonStyle(.plain)
+        .akariIconHover()
         .help("Remove attachment")
     }
 
@@ -412,7 +412,6 @@ private struct MicButton: View {
                 default:
                     Image(systemName: "mic")
                         .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(.secondary)
                 }
             }
             .frame(width: 30, height: 30)
@@ -420,6 +419,7 @@ private struct MicButton: View {
             .contentShape(Circle())
         }
         .buttonStyle(.plain)
+        .akariIconHover()
         .help(speech.state == .recording ? "Stop and send" : "Dictate")
         .disabled(disabled || speech.state == .loading || speech.state == .transcribing)
         .animation(.smooth(duration: 0.2), value: speech.state == .recording)

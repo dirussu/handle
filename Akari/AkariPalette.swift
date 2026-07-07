@@ -130,31 +130,72 @@ struct AkariSolidButtonStyle: ButtonStyle {
     let variant: Variant
 
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.akariBody.weight(variant == .neutral ? .medium : .semibold))
-            .foregroundStyle(foreground)
-            .padding(.horizontal, AkariSpacing.l)
-            .padding(.vertical, 7)
-            .background(background, in: Capsule())
-            .scaleEffect(configuration.isPressed ? 0.96 : 1.0)
-            .opacity(configuration.isPressed ? 0.85 : 1.0)
-            .animation(.smooth(duration: 0.14), value: configuration.isPressed)
+        HoverBody(configuration: configuration, variant: variant)
     }
 
-    private var foreground: Color {
-        switch variant {
-        case .neutral:     return .white.opacity(0.9)
-        case .prominent:   return .black              // on a white fill
-        case .destructive: return .white
+    /// ButtonStyle can't hold @State, so the body lives in a nested view that
+    /// tracks hover: a light background lift + a whisper of scale (hover is seen
+    /// constantly — fast and subtle), on top of the existing press feedback.
+    private struct HoverBody: View {
+        let configuration: Configuration
+        let variant: Variant
+        @State private var hovering = false
+
+        var body: some View {
+            configuration.label
+                .font(.akariBody.weight(variant == .neutral ? .medium : .semibold))
+                .foregroundStyle(foreground)
+                .padding(.horizontal, AkariSpacing.l)
+                .padding(.vertical, 7)
+                .background(background, in: Capsule())
+                .scaleEffect(configuration.isPressed ? 0.96 : (hovering ? 1.02 : 1.0))
+                .opacity(configuration.isPressed ? 0.85 : 1.0)
+                .animation(.smooth(duration: 0.14), value: configuration.isPressed)
+                .animation(.smooth(duration: 0.15), value: hovering)
+                .onHover { hovering = $0 }
+        }
+
+        private var foreground: Color {
+            switch variant {
+            case .neutral:     return .white.opacity(hovering ? 1.0 : 0.9)
+            case .prominent:   return .black              // on a white fill
+            case .destructive: return .white
+            }
+        }
+
+        private var background: AnyShapeStyle {
+            switch variant {
+            case .neutral:     return AnyShapeStyle(Color.white.opacity(hovering ? 0.15 : 0.10))
+            case .prominent:   return AnyShapeStyle(Color.white)            // white = the action
+            case .destructive: return AnyShapeStyle(Color.red)             // red = the one semantic exception (danger)
+            }
         }
     }
+}
 
-    private var background: AnyShapeStyle {
-        switch variant {
-        case .neutral:     return AnyShapeStyle(Color.white.opacity(0.10))
-        case .prominent:   return AnyShapeStyle(Color.white)            // white = the action
-        case .destructive: return AnyShapeStyle(Color.red)             // red = the one semantic exception (danger)
-        }
+// MARK: - Icon-button hover
+//
+// Bare icon buttons (⋯, new chat, paperclip, trash, …) get ONE shared hover:
+// the glyph simply brightens to full white — no wash, no container, no scale
+// (founder call; DESIGN.md "hierarchy from opacity"). The modifier OWNS the
+// tint, so the label must not set its own foregroundStyle (it would override).
+
+private struct AkariIconHover: ViewModifier {
+    let idle: Color
+    @State private var hovering = false
+    func body(content: Content) -> some View {
+        content
+            .foregroundStyle(hovering ? .white : idle)
+            .animation(.smooth(duration: 0.15), value: hovering)
+            .onHover { hovering = $0 }
+    }
+}
+
+extension View {
+    /// Akari's shared icon-button hover: brighten to white. `idle` is the
+    /// resting tint (default: secondary).
+    func akariIconHover(idle: Color = Color(nsColor: .secondaryLabelColor)) -> some View {
+        modifier(AkariIconHover(idle: idle))
     }
 }
 

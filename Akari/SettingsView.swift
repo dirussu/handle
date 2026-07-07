@@ -142,14 +142,15 @@ private struct AutomationsSection: View {
                         } label: {
                             Image(systemName: "pencil")
                                 .font(.system(size: 12))
-                                .foregroundStyle(editingID == a.id ? .primary : .secondary)
                         }
                         .buttonStyle(.borderless)
+                        .akariIconHover(idle: editingID == a.id ? Color.white : Color(nsColor: .secondaryLabelColor))
                         .help("Edit")
                         Button { delete(a) } label: {
-                            Image(systemName: "trash").font(.system(size: 12)).foregroundStyle(.secondary)
+                            Image(systemName: "trash").font(.system(size: 12))
                         }
                         .buttonStyle(.borderless)
+                        .akariIconHover()
                     }
                     if editingID == a.id {
                         AutomationEditor(original: a) { updated in
@@ -485,9 +486,9 @@ private struct MemorySection: View {
                         } label: {
                             Image(systemName: "trash")
                                 .font(.system(size: 11))
-                                .foregroundStyle(.secondary)
                         }
                         .buttonStyle(.plain)
+                        .akariIconHover()
                         .help("Forget this")
                     }
                 }
