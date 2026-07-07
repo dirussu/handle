@@ -49,6 +49,32 @@ private struct SettingsHeader: View {
     }
 }
 
+/// A small centered empty-state — dimmed icon + title + hint — matching the
+/// Chats page hero, scaled for a Form section. Replaces the bare gray "No X yet"
+/// lines so an empty section reads as designed, not unfinished.
+private struct SettingsEmptyState: View {
+    let icon: String
+    let title: String
+    let hint: String
+    var body: some View {
+        VStack(spacing: AkariSpacing.s) {
+            Image(systemName: icon)
+                .font(.system(size: 24, weight: .regular))
+                .foregroundStyle(.white.opacity(0.22))
+            Text(title)
+                .font(.akariSection)
+                .foregroundStyle(.white.opacity(0.9))
+            Text(hint)
+                .font(.akariCaption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, AkariSpacing.l)
+    }
+}
+
 /// The settings content (the Form), with no window/panel chrome — so it can
 /// render as a page inside the notch. The notch page wraps it with a header.
 /// Section order is a deliberate narrative: how you drive it → what it does on
@@ -95,8 +121,10 @@ private struct AutomationsSection: View {
     var body: some View {
         Section {
             if automations.isEmpty {
-                Text("No saved automations yet. Ask Akari for one — e.g. \"set my volume to 20 every day at 6pm\" or \"when I open Zoom, set the volume to 30\".")
-                    .font(.caption).foregroundStyle(.secondary)
+                SettingsEmptyState(
+                    icon: "clock.arrow.circlepath",
+                    title: "No automations yet",
+                    hint: "Ask Akari for one — e.g. \u{201C}every day at 6pm, set my volume to 20\u{201D}.")
             } else {
                 ForEach(automations) { a in
                     HStack(spacing: 8) {
@@ -437,8 +465,10 @@ private struct MemorySection: View {
     var body: some View {
         Section {
             if facts.isEmpty {
-                Text("Nothing remembered yet. Say \u{201C}remember that \u{2026}\u{201D} in chat, or add a fact below.")
-                    .font(.caption).foregroundStyle(.secondary)
+                SettingsEmptyState(
+                    icon: "brain",
+                    title: "Nothing remembered yet",
+                    hint: "Say \u{201C}remember that \u{2026}\u{201D} in chat, or add a fact below.")
             } else {
                 ForEach(facts) { fact in
                     HStack(spacing: 8) {
@@ -462,8 +492,9 @@ private struct MemorySection: View {
                 }
             }
             HStack(spacing: 8) {
-                TextField("Add a fact, e.g. Mary = mary@acme.com", text: $draft)
+                TextField("Add a fact", text: $draft, prompt: Text("Add a fact, e.g. Mary = mary@acme.com"))
                     .textFieldStyle(.roundedBorder)
+                    .labelsHidden()   // placeholder INSIDE the field, not a wrapping left label
                     .onSubmit(add)
                 Button("Add", action: add)
                     .buttonStyle(.akariSolid)
@@ -514,8 +545,10 @@ private struct ActivitySection: View {
     var body: some View {
         Section {
             if entries.isEmpty {
-                Text("No tool activity yet.")
-                    .font(.caption).foregroundStyle(.secondary)
+                SettingsEmptyState(
+                    icon: "list.bullet.rectangle",
+                    title: "No activity yet",
+                    hint: "Every tool Akari runs shows up here.")
             } else {
                 ForEach(entries) { e in
                     HStack(spacing: 8) {

@@ -437,6 +437,7 @@ private struct NotificationCenterView: View {
     let width: CGFloat        // matches the notch — never wider
     let onOpen: () -> Void
     let onDismissAll: () -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduce
     @State private var expanded = false
     @State private var pillHover = false
 
@@ -450,13 +451,13 @@ private struct NotificationCenterView: View {
                 // top-down on expand, bottom-up retracting into the pill on
                 // collapse. Each is the same pop, just delayed by its position.
                 collapseHandle
-                    .transition(.asymmetric(
+                    .transition(reduce ? .opacity : .asymmetric(
                         insertion: AkariMotion.popFromTop.animation(AkariMotion.pop),
                         removal: AkariMotion.popFromTop.animation(AkariMotion.pop.delay(Double(notifications.count) * stagger))
                     ))
                 ForEach(Array(notifications.reversed().enumerated()), id: \.element.id) { item in
                     NotificationCard(note: item.element, width: width, onOpen: onOpen)
-                        .transition(.asymmetric(
+                        .transition(reduce ? .opacity : .asymmetric(
                             insertion: AkariMotion.popFromTop.animation(AkariMotion.pop.delay(Double(item.offset + 1) * stagger)),
                             removal: AkariMotion.popFromTop.animation(AkariMotion.pop.delay(Double(notifications.count - 1 - item.offset) * stagger))
                         ))
@@ -467,7 +468,7 @@ private struct NotificationCenterView: View {
 
     /// Pop the stack out of / into the pill — the bouncy spring is the funk.
     private func toggle() {
-        withAnimation(AkariMotion.pop) { expanded.toggle() }
+        withAnimation(reduce ? .easeOut(duration: 0.2) : AkariMotion.pop) { expanded.toggle() }
     }
 
     private var countPill: some View {
@@ -515,7 +516,7 @@ private struct NotificationCenterView: View {
     }
 
     private var collapseHandle: some View {
-        Button { withAnimation(AkariMotion.pop) { expanded = false } } label: {
+        Button { withAnimation(reduce ? .easeOut(duration: 0.2) : AkariMotion.pop) { expanded = false } } label: {
             Image(systemName: "chevron.up")
                 .font(.system(size: 11, weight: .bold))
                 .foregroundStyle(.white.opacity(0.7))

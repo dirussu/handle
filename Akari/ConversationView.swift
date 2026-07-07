@@ -76,6 +76,11 @@ struct ConversationContent: View {
                         Color.clear.frame(height: 1).id("bottom")
                     }
                     .padding(.horizontal, 2)
+                    // Breathing room above the first message so it doesn't sit jammed
+                    // under the notch. Only when there ARE messages — the greeting's
+                    // own top padding covers the empty state. Applied before the height
+                    // measurement so the transcript frame accounts for it.
+                    .padding(.top, conversation.visibleMessages.isEmpty ? 0 : AkariSpacing.xxl)
                     .background(
                         GeometryReader { geo in
                             Color.clear.preference(key: TranscriptHeightKey.self, value: geo.size.height)
