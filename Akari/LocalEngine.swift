@@ -165,7 +165,14 @@ final class LocalEngine: ObservableObject {
                             parameters: self.generation,
                             context: context
                         ) { tokens in
-                            let full = context.tokenizer.decode(tokens: tokens)
+                            var full = context.tokenizer.decode(tokens: tokens)
+                            // A multi-byte char (e.g. an emoji) split across tokens decodes to
+                            // a trailing replacement char (\u{FFFD}) until the next token
+                            // completes it. Hold that partial tail back — otherwise it sticks in
+                            // the transcript as � and the real glyph is dropped, because the
+                            // count-based diff never sees the fix (� and the emoji are both one
+                            // Character, so `full.count` doesn't grow when it completes).
+                            while full.last == "\u{FFFD}" { full.removeLast() }
                             if full.count > printed.value.count {
                                 let delta = String(full.dropFirst(printed.value.count))
                                 printed.value = full
