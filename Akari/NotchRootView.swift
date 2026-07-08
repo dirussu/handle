@@ -25,6 +25,11 @@ struct NotchRootView: View {
     @State private var isHovering = false
     @State private var hoverTask: Task<Void, Never>?
     @State private var showMenu = false   // the custom ⋯ dropdown
+    /// Keeps the surface painted through the close spring: closing is usually
+    /// caused by the cursor LEAVING (which also exits the proximity zone), and
+    /// unpainting mid-collapse would swallow the close animation.
+    @State private var closingGrace = false
+    @State private var closingGraceTask: Task<Void, Never>?
 
     // The notch's springs — now the app's shared motion system (AkariMotion),
     // so the notification center and everything else animate identically.
@@ -60,6 +65,25 @@ struct NotchRootView: View {
     /// (straight edges sit at x = topRadius) plus breathing room.
     private var contentInset: CGFloat { 32 }
 
+    /// What the notch surface PAINTS. On a hardware notch the UNATTENDED closed
+    /// pill paints NOTHING — the physical cutout is already black, so the fill
+    /// added zero normally and became the visible sliding artifact during Space
+    /// switches (all-Spaces windows render live in BOTH sliding space trees; no
+    /// window level opts out — tested, founder video). `cursorNearNotch` paints
+    /// it back INSTANTLY as the cursor approaches (controller-fed global mouse
+    /// tracking, no animation), so by the time you can hover, the pill is
+    /// already solid and hover adds only the glow — pixel-identical to the old
+    /// always-painted behavior. A Space swipe happens with the cursor elsewhere,
+    /// so there's nothing of Akari to slide. Also painted: the open panel, the
+    /// working comet's bed, and the synthesized pill on cutout-less displays.
+    private var surfacePaint: Color {
+        if vm.phase == .open || vm.isWorking || vm.cursorNearNotch || isHovering
+            || closingGrace || !vm.isHardwareNotch {
+            return .black
+        }
+        return .clear
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             notchSurface
@@ -83,6 +107,21 @@ struct NotchRootView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .preferredColorScheme(.dark)
         .onPreferenceChange(SurfaceHeightKey.self) { vm.surfaceHeight = $0 }
+        // Hold the paint through the close spring (~0.45s) + a small margin,
+        // then release it — the pill quietly unpaints at rest.
+        .onChange(of: vm.phase) { _, phase in
+            closingGraceTask?.cancel()
+            if phase == .closed {
+                closingGrace = true
+                closingGraceTask = Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(700))
+                    guard !Task.isCancelled else { return }
+                    closingGrace = false
+                }
+            } else {
+                closingGrace = false
+            }
+        }
         // The pill's drop-in / collapse / dismiss are animated at the mutation
         // site (NotchController wraps those in `withAnimation`), so the notch's
         // own open/close springs stay untouched.
@@ -103,7 +142,7 @@ struct NotchRootView: View {
                 openBody
                     // The app's shared `emerge` transition (the notification
                     // cards use it too); keeps the notch's own settled timing.
-                    .transition(AkariMotion.emerge.animation(.smooth(duration: 0.35)))
+                    .transition(AkariMotion.emerge.animation(AkariMotion.swap))
             }
         }
         // Width animates; height is intrinsic (the conversation self-sizes),
@@ -132,7 +171,7 @@ struct NotchRootView: View {
                     .padding(.top, 5)
             }
         }
-        .background(Color.black)
+        .background(surfacePaint)
         // Report the surface's rendered height (= the panel's bottom edge in
         // top-left screen coords) so the pointer can spit out of it.
         .background { GeometryReader { g in Color.clear.preference(key: SurfaceHeightKey.self, value: g.size.height) } }
@@ -140,7 +179,7 @@ struct NotchRootView: View {
         // Cover the 1px seam where the flared top meets the bezel.
         .overlay(alignment: .top) {
             Rectangle()
-                .fill(Color.black)
+                .fill(surfacePaint)
                 .frame(height: 1)
                 .padding(.horizontal, topRadius)
         }
@@ -152,11 +191,11 @@ struct NotchRootView: View {
         // Composite the whole notch as ONE layer so the shape + content
         // animate together (Boring Notch does this — key to the smoothness).
         .compositingGroup()
-        // Boring Notch's shadow: a symmetric soft glow (no y offset) that
-        // appears on hover or while open. radius 6, black @ 0.7.
+        // Symmetric soft glow (no y offset) on hover or while open. Bumped from
+        // Boring Notch's radius 6 @ 0.7 on founder request — a bit stronger.
         .shadow(
-            color: (vm.phase == .open || isHovering) ? .black.opacity(0.7) : .clear,
-            radius: 6
+            color: (vm.phase == .open || isHovering) ? .black.opacity(0.85) : .clear,
+            radius: 9
         )
         // Working comet — placed AFTER the compositingGroup so its glow isn't
         // clipped to the pill bounds (inside the group it read as narrower and
@@ -433,6 +472,7 @@ private struct MenuRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .animation(AkariMotion.feedback, value: hovering)   // was instant — brand feedback beat
         .onHover { hovering = $0 }
     }
 }

@@ -29,6 +29,11 @@ final class NotchWindow: NSPanel {
         // Force dark appearance regardless of system setting (Boring Notch
         // does the same) so the black surface + controls render consistently.
         appearance = NSAppearance(named: .darkAqua)
+        // NOTE: Space transitions render all-Spaces windows LIVE in BOTH sliding
+        // space trees — no window level opts out (dragging level tested, failed;
+        // founder video evidence). The fix lives in NotchRootView instead: the
+        // closed pill paints NOTHING on a hardware notch, so there is nothing to
+        // slide. Level stays just above the menu bar.
         level = NSWindow.Level(rawValue: NSWindow.Level.mainMenu.rawValue + 3)
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
     }
@@ -87,6 +92,16 @@ final class NotchController {
 
     private var keyMonitor: Any?
     private var screenObserver: Any?
+    private var spaceObserver: Any?
+    private var spaceFadeTask: Task<Void, Never>?
+    private var mouseMonitorGlobal: Any?
+    private var mouseMonitorLocal: Any?
+    /// Fingerprint of the current display arrangement — rebuild only when THIS
+    /// changes. macOS fires didChangeScreenParameters during Space switches too
+    /// (menu-bar/fullscreen state flips); rebuilding then put a NEW stationary
+    /// notch on screen while the OLD one was still sliding in the outgoing
+    /// Space's transition image — the "notch doubles itself" bug.
+    private var screenSignature: [String] = []
 
     private init() {}
 
@@ -106,19 +121,103 @@ final class NotchController {
     func install() {
         guard notches.isEmpty else { return }
         rebuild()
+        installMouseProximityMonitors()
         // Re-mirror onto whatever displays exist when the arrangement changes
-        // (monitor plugged/unplugged, resolution change, etc.).
+        // (monitor plugged/unplugged, resolution change, etc.). Guarded by the
+        // display fingerprint: Space switches also fire this notification, and
+        // rebuilding then visibly DOUBLED the notch mid-swipe (old window in the
+        // outgoing Space's slide image + the fresh stationary one).
         screenObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification,
             object: nil, queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in self?.rebuild() }
+            Task { @MainActor in
+                guard let self else { return }
+                let sig = Self.displaySignature()
+                guard sig != self.screenSignature else { return }   // spurious (Space switch) — keep the windows
+                self.rebuild()
+            }
+        }
+        // Space switch: the pill VANISHES for the slide and fades back in once
+        // the switch settles (founder call — the hardware notch stays put, so
+        // our pill blinks away rather than hovering over two sliding desktops).
+        // There's no "swipe began" event; activeSpaceDidChange fires as the
+        // switch kicks in, so hide instantly, then fade back after the
+        // transition duration. Rapid multi-swipes just keep it hidden.
+        spaceObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.activeSpaceDidChangeNotification,
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                for n in self.notches {
+                    n.window.alphaValue = 0
+                    n.window.orderFrontRegardless()   // and never leave a stale ghost above the real notch
+                }
+                self.spaceFadeTask?.cancel()
+                self.spaceFadeTask = Task { @MainActor [weak self] in
+                    try? await Task.sleep(for: .milliseconds(650))
+                    guard let self, !Task.isCancelled else { return }
+                    self.fadeNotchesBackIn()
+                }
+            }
+        }
+    }
+
+    /// Sync on purpose: in an async context the compiler resolves AppKit's
+    /// ASYNC `runAnimationGroup` overload (won't build without await).
+    private func fadeNotchesBackIn() {
+        for n in notches {
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = 0.3
+                ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                n.window.animator().alphaValue = 1
+            }
+        }
+    }
+
+    /// Global + local mouse tracking for the proximity paint: the closed pill
+    /// paints black the moment the cursor nears the notch — INSTANTLY (no
+    /// animation), so by the time it can hover, the pill looks exactly like the
+    /// old always-painted one. Both monitors are needed: global fires while the
+    /// cursor is over other apps; local while it's over our own window.
+    private func installMouseProximityMonitors() {
+        guard mouseMonitorGlobal == nil else { return }
+        mouseMonitorGlobal = NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved]) { [weak self] _ in
+            Task { @MainActor in self?.updateCursorProximity() }
+        }
+        mouseMonitorLocal = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved]) { [weak self] event in
+            Task { @MainActor in self?.updateCursorProximity() }
+            return event
+        }
+        updateCursorProximity()
+    }
+
+    private func updateCursorProximity() {
+        let loc = NSEvent.mouseLocation
+        for n in notches {
+            guard let screen = NSScreen.screens.first(where: { $0.akariDisplayID == n.displayID }) else { continue }
+            let f = screen.frame
+            let nearY = loc.y >= f.maxY - n.vm.closedSize.height - 44
+            let nearX = abs(loc.x - f.midX) <= n.vm.closedSize.width / 2 + 160
+            let near = nearY && nearX && loc.x >= f.minX && loc.x <= f.maxX
+            if n.vm.cursorNearNotch != near { n.vm.cursorNearNotch = near }
+        }
+    }
+
+    /// One line per display: id + frame + notch inset. Space switches don't
+    /// change this; plugging/unplugging/rearranging/resolution changes do.
+    private static func displaySignature() -> [String] {
+        NSScreen.screens.compactMap { s in
+            guard let id = s.akariDisplayID else { return nil }
+            return "\(id):\(Int(s.frame.origin.x)),\(Int(s.frame.origin.y)) \(Int(s.frame.width))×\(Int(s.frame.height)) inset:\(Int(s.safeAreaInsets.top))"
         }
     }
 
     /// Tear down and recreate one notch per current display, re-applying the
     /// shared conversation / working state to each.
     private func rebuild() {
+        screenSignature = Self.displaySignature()
         for n in notches { n.window.orderOut(nil); n.window.close() }
         notches.removeAll()
 
@@ -131,7 +230,8 @@ final class NotchController {
 
     private func makeNotch(for screen: NSScreen, id: CGDirectDisplayID) -> DisplayNotch {
         let closedSize = Self.closedNotchSize(for: screen)
-        let vm = NotchViewModel(closedSize: closedSize, openWidth: openWidth)
+        let vm = NotchViewModel(closedSize: closedSize, openWidth: openWidth,
+                                isHardwareNotch: screen.safeAreaInsets.top > 0)
         let origin = NSPoint(
             x: screen.frame.midX - windowWidth / 2,
             y: screen.frame.maxY - windowHeight

@@ -26,6 +26,11 @@ final class NotchViewModel: ObservableObject {
     @Published var route: NotchRoute = .chat
     @Published var isWorking: Bool = false
     @Published var pinned: Bool = false
+    /// Cursor is near the notch (controller-fed, global mouse tracking). The
+    /// closed pill paints ONLY then — instantly, before the cursor arrives — so
+    /// hover looks exactly like the old always-painted pill, while a Space swipe
+    /// (cursor elsewhere) has nothing of Akari to slide.
+    @Published var cursorNearNotch: Bool = false
 
     /// Measured height of the rendered notch surface (pill when closed, panel
     /// when open). The window's top sits at the screen top, so the surface's
@@ -56,9 +61,14 @@ final class NotchViewModel: ObservableObject {
     let closedSize: CGSize
     /// The open panel's nominal width; height grows to fit content.
     let openWidth: CGFloat
+    /// True when this display has a physical camera-housing cutout. The closed
+    /// pill paints NOTHING there (the cutout is already black); a synthesized
+    /// pill on an external display must paint itself.
+    let isHardwareNotch: Bool
 
-    init(closedSize: CGSize, openWidth: CGFloat) {
+    init(closedSize: CGSize, openWidth: CGFloat, isHardwareNotch: Bool = true) {
         self.closedSize = closedSize
         self.openWidth = openWidth
+        self.isHardwareNotch = isHardwareNotch
     }
 }

@@ -73,12 +73,9 @@ final class MetaballPointer {
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = false
-        // Sit JUST BELOW the notch window (which is mainMenu+3) so the pill/panel
-        // OCCLUDES the hidden reservoir and the droplet's in-surface start — only
-        // the part that clears the bottom edge shows, oozing out from under the
-        // surface. The notch window is transparent below the pill/panel, so the
-        // droplet shows through there; still above app windows, so it reads over
-        // whatever content is behind.
+        // Sit JUST BELOW the notch window (mainMenu+3) so the pill/panel OCCLUDES
+        // the hidden reservoir and the droplet's in-surface start — only the part
+        // that clears the bottom edge shows, oozing out from under the surface.
         panel.level = NSWindow.Level(rawValue: NSWindow.Level.mainMenu.rawValue + 2)
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
         panel.ignoresMouseEvents = true
