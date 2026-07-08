@@ -150,8 +150,8 @@ struct AkariSolidButtonStyle: ButtonStyle {
                 .background(background, in: Capsule())
                 .scaleEffect(configuration.isPressed ? 0.96 : (hovering ? 1.02 : 1.0))
                 .opacity(configuration.isPressed ? 0.85 : 1.0)
-                .animation(.smooth(duration: 0.14), value: configuration.isPressed)
-                .animation(.smooth(duration: 0.15), value: hovering)
+                .animation(AkariMotion.feedback, value: configuration.isPressed)
+                .animation(AkariMotion.feedback, value: hovering)
                 .onHover { hovering = $0 }
         }
 
@@ -186,7 +186,7 @@ private struct AkariIconHover: ViewModifier {
     func body(content: Content) -> some View {
         content
             .foregroundStyle(hovering ? .white : idle)
-            .animation(.smooth(duration: 0.15), value: hovering)
+            .animation(AkariMotion.feedback, value: hovering)
             .onHover { hovering = $0 }
     }
 }
@@ -215,6 +215,28 @@ extension ButtonStyle where Self == AkariSolidButtonStyle {
 // coming OUT of that source and collapsing back INTO it.
 
 enum AkariMotion {
+    // ---- The duration ramp (like the type ramp: three roles, no magic numbers) ----
+
+    /// Micro feedback — hover tints, press scale, focus rings. Constant and
+    /// fast; the user should feel it, never watch it.
+    static let feedback = Animation.smooth(duration: 0.15)
+    /// In-place content swap — a control morphing (send↔stop), a status flip,
+    /// the transcript growing, panel content emerging.
+    static let swap = Animation.smooth(duration: 0.28)
+    /// Whole-surface change — an onboarding step advancing, a card dissolving
+    /// into the next. The one deliberate, watchable beat.
+    static let settle = Animation.smooth(duration: 0.45)
+    /// Staggered entrance — elements blur-rising in as a screen assembles
+    /// (delay by index; onboarding heroes). Slightly springy, alive.
+    static let enter = Animation.spring(duration: 0.55, bounce: 0.12)
+
+    // Ambient exceptions (documented, not tokens): the hero glow breathe
+    // (easeInOut 2.8s forever) and the Thinking… label breathe (0.95s forever)
+    // are mood, not motion — they deliberately live outside the ramp, as does
+    // the metaball pointer's hand-tuned physics choreography.
+
+    // ---- The notch mechanism's springs ----
+
     /// A surface expanding into view — the notch's open spring (slight overshoot).
     static let open = Animation.spring(response: 0.42, dampingFraction: 0.8, blendDuration: 0)
     /// A surface collapsing — the notch's close spring (settled, no overshoot).

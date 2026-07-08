@@ -76,7 +76,7 @@ struct OnboardingBody: View {
     }
 
     private func advance(to next: Int) {
-        withAnimation(reduce ? .easeOut(duration: 0.2) : .smooth(duration: 0.45)) { step = next }
+        withAnimation(reduce ? .easeOut(duration: 0.2) : AkariMotion.settle) { step = next }
     }
 }
 
@@ -94,7 +94,7 @@ private struct AppearIn: ViewModifier {
             .opacity(appeared ? 1 : 0)
             .offset(y: (appeared || reduce) ? 0 : 12)
             .blur(radius: (appeared || reduce) ? 0 : 4)
-            .animation(.spring(duration: 0.55, bounce: 0.12).delay(Double(index) * 0.07), value: appeared)
+            .animation(AkariMotion.enter.delay(Double(index) * 0.07), value: appeared)
     }
 }
 private extension View {
@@ -192,7 +192,7 @@ private struct StepDots: View {
                     .frame(width: i == index ? 18 : 6, height: 6)
             }
         }
-        .animation(.spring(duration: 0.4, bounce: 0.2), value: index)
+        .animation(AkariMotion.pop, value: index)
     }
 }
 
@@ -343,7 +343,7 @@ private struct PermissionsFlow: View {
     /// Grant → next; skip → next; past the end → hand back to the parent flow.
     private func advance() {
         if index + 1 >= perms.count { onDone() }
-        else { withAnimation(reduce ? .easeOut(duration: 0.2) : .smooth(duration: 0.45)) { index += 1 } }
+        else { withAnimation(reduce ? .easeOut(duration: 0.2) : AkariMotion.settle) { index += 1 } }
     }
 
     private static func makePerms() -> [Perm] {
@@ -461,7 +461,7 @@ private struct PermissionCard: View {
     /// ✓ badge, wait for a tap; don't yank them forward when they didn't act).
     @MainActor private func firstResolve() async {
         let s = await perm.refresh()
-        withAnimation(.easeOut(duration: 0.25)) {
+        withAnimation(AkariMotion.swap) {
             status = s
             resolved = true
             if s == .granted { preGranted = true }
@@ -478,7 +478,7 @@ private struct PermissionCard: View {
                 try? await Task.sleep(nanoseconds: 500_000_000)
                 let s = await perm.refresh()
                 if s == .granted {
-                    withAnimation(.easeOut(duration: 0.3)) { status = s }
+                    withAnimation(AkariMotion.swap) { status = s }
                     scheduleAdvance(after: 0.7)
                     return
                 }

@@ -86,7 +86,7 @@ struct ConversationContent: View {
                             Color.clear.preference(key: TranscriptHeightKey.self, value: geo.size.height)
                         }
                     )
-                    .animation(.smooth(duration: 0.32), value: conversation.visibleMessages.count)
+                    .animation(AkariMotion.swap, value: conversation.visibleMessages.count)
                 }
                 // +1 epsilon so sub-pixel measurement rounding can't make a
                 // snug transcript falsely "overflow" and show a scrollbar.
@@ -98,7 +98,7 @@ struct ConversationContent: View {
                 .scrollEdgeFade(top: 24, bottom: 0)   // fade under the header; keep the latest reply crisp
                 .onPreferenceChange(TranscriptHeightKey.self) { conversation.transcriptHeight = $0 }
                 .onChange(of: lastMessageText) {
-                    withAnimation(.smooth(duration: 0.28)) {
+                    withAnimation(AkariMotion.swap) {
                         proxy.scrollTo("bottom", anchor: .bottom)
                     }
                 }
@@ -113,9 +113,9 @@ struct ConversationContent: View {
                         .transition(.opacity)
                 }
             }
-            .animation(.smooth(duration: 0.28), value: conversation.pendingConfirmation?.id)
+            .animation(AkariMotion.swap, value: conversation.pendingConfirmation?.id)
         }
-        .animation(.smooth(duration: 0.3), value: conversation.visibleMessages.isEmpty)
+        .animation(AkariMotion.swap, value: conversation.visibleMessages.isEmpty)
         .tint(.white)   // white-only accent everywhere (caret, selection, links)
         .onAppear { inputFocused = true }
         // New chat (or reopening one) swaps the conversation in place without a
@@ -292,8 +292,8 @@ struct ConversationContent: View {
                         .keyboardShortcut(.return, modifiers: [])
                     }
                 }
-                .animation(.smooth(duration: 0.22), value: conversation.isAwaitingResponse)
-                .animation(.smooth(duration: 0.22), value: canSubmit)
+                .animation(AkariMotion.swap, value: conversation.isAwaitingResponse)
+                .animation(AkariMotion.swap, value: canSubmit)
             }
         }
         .padding(.horizontal, AkariSpacing.m)
@@ -313,8 +313,8 @@ struct ConversationContent: View {
             }
             .compositingGroup()
         }
-        .animation(.smooth(duration: 0.2), value: inputFocused)
-        .animation(.smooth(duration: 0.3), value: conversation.isAwaitingResponse)
+        .animation(AkariMotion.feedback, value: inputFocused)
+        .animation(AkariMotion.swap, value: conversation.isAwaitingResponse)
         // Isolate the bubble's geometry so it + its background comet resolve
         // any ancestor resize (the transcript growing mid-answer) as ONE
         // rigid unit — the comet can't lag behind the bubble's frame.
@@ -422,7 +422,7 @@ private struct MicButton: View {
         .akariIconHover()
         .help(speech.state == .recording ? "Stop and send" : "Dictate")
         .disabled(disabled || speech.state == .loading || speech.state == .transcribing)
-        .animation(.smooth(duration: 0.2), value: speech.state == .recording)
+        .animation(AkariMotion.swap, value: speech.state == .recording)
     }
 
     private func toggle() {
@@ -512,7 +512,7 @@ struct ToolUseCard: View {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .fill(Color.white.opacity(0.06))
         }
-        .animation(.smooth(duration: 0.25), value: result?.isError)
+        .animation(AkariMotion.swap, value: result?.isError)
     }
 
     private var iconName: String {

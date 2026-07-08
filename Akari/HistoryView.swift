@@ -106,6 +106,7 @@ struct HistoryBody: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .animation(AkariMotion.feedback, value: confirmClear)
             }
         }
     }
@@ -184,6 +185,7 @@ private struct HistoryRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .animation(AkariMotion.feedback, value: hovering)   // was instant — brand feedback beat
         .onHover { hovering = $0 }
     }
 
