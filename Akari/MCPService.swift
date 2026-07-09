@@ -83,6 +83,73 @@ enum MCPConfig {
     }
 }
 
+/// The NL→arguments fill step for MCP tools (increment ② — the recipe
+/// pipeline's `fillParams`, generalized to real JSON-Schema). Pure functions:
+/// condense a tool's inputSchema into the flat param spec the 4B can fill
+/// from, and build the fill prompt — WORKED EXAMPLES + when-X-do-Y framing
+/// (the house rule: abstract instructions fail on the 4B; proven twice).
+/// Prompt quality is eval-gated: `__mcpfilleval__` runs real dumped schemas
+/// (tools/mcp_schemas.json) against the live model.
+enum MCPFill {
+    /// "- path (string, required): the file path" — one line per property.
+    /// Enums render as the value list (the model must pick, not invent);
+    /// arrays name their element type. Long descriptions truncate at a word
+    /// boundary (~140 chars) — schema prose can run to paragraphs
+    /// (sequential-thinking) and would drown the 4B.
+    static func condenseSchema(_ schema: [String: Any]) -> String {
+        let props = schema["properties"] as? [String: Any] ?? [:]
+        let required = Set(schema["required"] as? [String] ?? [])
+        return props.keys.sorted().map { name -> String in
+            let p = props[name] as? [String: Any] ?? [:]
+            var kind = p["type"] as? String ?? "string"
+            if let values = p["enum"] as? [Any] {
+                kind = "one of: " + values.map { "\($0)" }.joined(separator: " | ")
+            } else if kind == "array" {
+                let item = (p["items"] as? [String: Any])?["type"] as? String ?? "string"
+                kind = "list of \(item)"
+            }
+            let flag = required.contains(name) ? ", required" : ""
+            var desc = (p["description"] as? String ?? p["title"] as? String ?? "")
+                .replacingOccurrences(of: "\n", with: " ")
+            if desc.count > 140 {
+                desc = String(desc.prefix(140))
+                if let cut = desc.range(of: " ", options: .backwards) { desc = String(desc[..<cut.lowerBound]) }
+                desc += "…"
+            }
+            return "- \(name) (\(kind)\(flag))" + (desc.isEmpty ? "" : ": \(desc)")
+        }.joined(separator: "\n")
+    }
+
+    /// The fill prompt. Two worked examples carry the rules the 4B won't take
+    /// abstractly: values come from the user's words (typed correctly), and
+    /// optional arguments the user didn't mention are LEFT OUT.
+    static func prompt(goal: String, toolName: String, description: String, schema: [String: Any]) -> String {
+        var desc = description.replacingOccurrences(of: "\n", with: " ")
+        if desc.count > 200 { desc = String(desc.prefix(200)) + "…" }
+        return """
+        Fill in the arguments for a tool call. Reply with ONLY a JSON object mapping each \
+        argument name to its value. Take values from the user's request — text as a string, \
+        a number as a number, true/false as a boolean. Include every required argument. \
+        When the user didn't mention an optional argument, LEAVE IT OUT.
+
+        Example — the user wants "play Hey Jude by the Beatles", the tool play_song takes:
+        - artist (string): the artist name
+        - title (string, required): the song title
+        Reply: {"title": "Hey Jude", "artist": "The Beatles"}
+
+        Example — the user wants "show the 3 newest photos", the tool list_photos takes:
+        - count (number): how many to show
+        - folder (string): only this album
+        Reply: {"count": 3}
+
+        Now the user wants: "\(goal)"
+        The tool \(toolName)\(desc.isEmpty ? "" : " — \(desc)") takes:
+        \(condenseSchema(schema))
+        Reply:
+        """
+    }
+}
+
 /// This file is the transport + lifecycle layer: config, connect, list tools,
 /// call a tool, crash recovery, disconnect — proven by the `__mcptest__`
 /// harness against `tools/fake_mcp_server.py`. Recipe-engine routing, Keychain

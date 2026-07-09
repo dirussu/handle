@@ -1,0 +1,101 @@
+{
+  "_comment": "4B fill eval on REAL MCP tool schemas (mcp_schemas.json, dumped live). Each case: NL goal + server/tool → expected arguments. Expected value forms: scalar = exact (strings case-insensitive), {\"any\": [...]} = any of these, {\"contains\": \"x\"} = ci substring. Keys not listed in expect must NOT be filled (optional-omission is part of the test).",
+  "cases": [
+    {
+      "id": "fs-write",
+      "server": "filesystem", "tool": "write_file",
+      "goal": "save the text 'hello world' into /tmp/note.txt",
+      "expect": { "path": "/tmp/note.txt", "content": "hello world" }
+    },
+    {
+      "id": "fs-read-head",
+      "server": "filesystem", "tool": "read_text_file",
+      "goal": "show me the first 20 lines of /var/log/system.log",
+      "expect": { "path": "/var/log/system.log", "head": 20 }
+    },
+    {
+      "id": "fs-move-paraphrase",
+      "server": "filesystem", "tool": "move_file",
+      "goal": "rename /tmp/draft.txt to /tmp/final.txt",
+      "expect": { "source": "/tmp/draft.txt", "destination": "/tmp/final.txt" }
+    },
+    {
+      "id": "fs-search-glob",
+      "server": "filesystem", "tool": "search_files",
+      "goal": "find every file with invoice in its name under /Users/dima/Documents",
+      "expect": { "path": "/Users/dima/Documents", "pattern": { "any": ["invoice", "*invoice*", "invoice*"] } }
+    },
+    {
+      "id": "fs-list",
+      "server": "filesystem", "tool": "list_directory",
+      "goal": "what's inside /Users/dima/Downloads",
+      "expect": { "path": "/Users/dima/Downloads" }
+    },
+    {
+      "id": "fs-multi-array",
+      "server": "filesystem", "tool": "read_multiple_files",
+      "goal": "read /tmp/a.txt and /tmp/b.txt together",
+      "expect": { "paths": ["/tmp/a.txt", "/tmp/b.txt"] }
+    },
+    {
+      "id": "mem-search",
+      "server": "memory", "tool": "search_nodes",
+      "goal": "look up everything you know about Mary Chen",
+      "expect": { "query": { "contains": "mary" } }
+    },
+    {
+      "id": "sum-numbers",
+      "server": "everything", "tool": "get-sum",
+      "goal": "add 17 and 25",
+      "expect": { "a": 17, "b": 25 }
+    },
+    {
+      "id": "echo-quote",
+      "server": "everything", "tool": "echo",
+      "goal": "have it echo back the word ping",
+      "expect": { "message": "ping" }
+    },
+    {
+      "id": "fetch-url",
+      "server": "fetch", "tool": "fetch",
+      "goal": "get the contents of https://example.com/pricing",
+      "expect": { "url": "https://example.com/pricing" }
+    },
+    {
+      "id": "fetch-maxlen",
+      "server": "fetch", "tool": "fetch",
+      "goal": "fetch just the first 500 characters of https://news.ycombinator.com",
+      "expect": { "url": { "any": ["https://news.ycombinator.com", "https://news.ycombinator.com/"] }, "max_length": 500 }
+    },
+    {
+      "id": "time-iana",
+      "server": "time", "tool": "get_current_time",
+      "goal": "what time is it in Tokyo right now",
+      "expect": { "timezone": "Asia/Tokyo" }
+    },
+    {
+      "id": "time-local-default",
+      "server": "time", "tool": "get_current_time",
+      "goal": "what time is it",
+      "expect": { "timezone": "Europe/Zurich" }
+    },
+    {
+      "id": "time-convert",
+      "server": "time", "tool": "convert_time",
+      "goal": "convert 15:30 Zurich time to New York time",
+      "expect": { "source_timezone": "Europe/Zurich", "time": "15:30", "target_timezone": "America/New_York" }
+    },
+    {
+      "id": "git-commit",
+      "server": "git", "tool": "git_commit",
+      "goal": "commit the repo at /Users/dima/proj with the message 'fix the header'",
+      "expect": { "repo_path": "/Users/dima/proj", "message": "fix the header" }
+    },
+    {
+      "id": "git-log-count",
+      "server": "git", "tool": "git_log",
+      "goal": "show the last 5 commits in /Users/dima/proj",
+      "expect": { "repo_path": "/Users/dima/proj", "max_count": 5 }
+    }
+  ]
+}

@@ -1094,6 +1094,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 else if cmd == "__trigtest__" { self?.runTrigTest() }
                 else if cmd == "__trigapptest__" { self?.runTrigAppTest() }
                 else if cmd == "__permstest__" { await self?.runPermsTest() }
+                else if cmd == "__mcpfilleval__" { await self?.runMCPFillEval() }
                 else if cmd.hasPrefix("__mcpconnect__") {
                     // Connect a configured server and LEAVE it running — for
                     // proving the quit path (terminateAllChildren) kills it.
@@ -1333,6 +1334,73 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         return [:]
+    }
+
+    /// Does a filled MCP argument match an eval expectation? Expectation forms:
+    /// scalar = exact (strings ci/trimmed, numbers numeric), {"any": [...]} =
+    /// any of these, {"contains": "x"} = ci substring, array = element-wise.
+    /// Pure — covered in __selftest__; the model runs only in __mcpfilleval__.
+    static func mcpFillMatches(got: Any?, want: Any) -> Bool {
+        guard let got else { return false }
+        if let spec = want as? [String: Any] {
+            if let anyOf = spec["any"] as? [Any] { return anyOf.contains { mcpFillMatches(got: got, want: $0) } }
+            if let sub = spec["contains"] as? String {
+                return (got as? String)?.lowercased().contains(sub.lowercased()) ?? false
+            }
+            return false
+        }
+        if let wantList = want as? [Any] {
+            guard let gotList = got as? [Any], gotList.count == wantList.count else { return false }
+            return zip(gotList, wantList).allSatisfy { mcpFillMatches(got: $0, want: $1) }
+        }
+        if let w = want as? String, let g = got as? String {
+            return g.trimmingCharacters(in: .whitespaces).lowercased() == w.lowercased()
+        }
+        if let w = want as? NSNumber, let g = got as? NSNumber { return w == g }
+        return false
+    }
+
+    /// MCP FILL EVAL (`__mcpfilleval__`): every case in tools/mcp_fill_eval.json
+    /// against the REAL schemas in tools/mcp_schemas.json (dumped from live
+    /// community servers) on the live model. Two tiers per case: VALUES (every
+    /// expected argument filled correctly) and STRICT (values + no unrequested
+    /// optional arguments). Results belong in EVALS.md.
+    private func runMCPFillEval() async {
+        let toolsDir = NSHomeDirectory() + "/Developer/AI Cursor Project/Akari/tools"
+        guard let schemaData = FileManager.default.contents(atPath: toolsDir + "/mcp_schemas.json"),
+              let schemas = (try? JSONSerialization.jsonObject(with: schemaData)) as? [String: [[String: Any]]],
+              let evalData = FileManager.default.contents(atPath: toolsDir + "/mcp_fill_eval.json"),
+              let evalRoot = (try? JSONSerialization.jsonObject(with: evalData)) as? [String: Any],
+              let cases = evalRoot["cases"] as? [[String: Any]] else {
+            agentLog.error("mcpfilleval: cannot load tools/mcp_schemas.json + tools/mcp_fill_eval.json"); return
+        }
+        var values = 0, strict = 0
+        for c in cases {
+            guard let id = c["id"] as? String, let server = c["server"] as? String,
+                  let toolName = c["tool"] as? String, let goal = c["goal"] as? String,
+                  let expect = c["expect"] as? [String: Any],
+                  let tool = schemas[server]?.first(where: { ($0["name"] as? String) == toolName }),
+                  let schema = tool["inputSchema"] as? [String: Any] else {
+                agentLog.error("mcpfilleval: bad case or missing schema — \(String(describing: c["id"]), privacy: .public)"); continue
+            }
+            let prompt = MCPFill.prompt(goal: goal, toolName: toolName,
+                                        description: tool["description"] as? String ?? "", schema: schema)
+            let reply = await askModel(prompt)
+            var filled: [String: Any] = [:]
+            for json in jsonObjectCandidates(in: reply) {
+                if let d = json.data(using: .utf8),
+                   let obj = try? JSONSerialization.jsonObject(with: d) as? [String: Any] { filled = obj; break }
+            }
+            let wrong = expect.keys.filter { !Self.mcpFillMatches(got: filled[$0], want: expect[$0]!) }.sorted()
+            let extras = filled.keys.filter { expect[$0] == nil }.sorted()
+            let valueOK = wrong.isEmpty
+            let strictOK = valueOK && extras.isEmpty
+            if valueOK { values += 1 }
+            if strictOK { strict += 1 }
+            let verdict = strictOK ? "PASS" : (valueOK ? "PASS-values (extra: \(extras.joined(separator: ",")))" : "FAIL (wrong: \(wrong.joined(separator: ",")))")
+            agentLog.info("mcpfilleval \(id, privacy: .public) [\(server, privacy: .public).\(toolName, privacy: .public)]: \(verdict, privacy: .public) — filled=\(String(describing: filled), privacy: .public)")
+        }
+        agentLog.info("mcpfilleval DONE: values \(values)/\(cases.count), strict \(strict)/\(cases.count)")
     }
 
     /// First integer (incl. negative) in a string.
@@ -1926,6 +1994,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         check("mcp crashloop 2 ok", !MCPConfig.isCrashLooping([mcpNow.addingTimeInterval(-1), mcpNow.addingTimeInterval(-2)], now: mcpNow))
         check("mcp crashloop none ok", !MCPConfig.isCrashLooping([], now: mcpNow))
         check("mcp config path", MCPConfig.url.path.hasSuffix("Akari/mcp.json"))
+        // MCP fill (v2 #1 increment ②) — schema condenser, fill prompt, eval matcher
+        let fillSchema: [String: Any] = ["type": "object",
+            "properties": ["path": ["type": "string", "description": "the file path"],
+                           "head": ["type": "number", "description": "first N lines"],
+                           "mode": ["enum": ["fast", "safe"]],
+                           "tags": ["type": "array", "items": ["type": "string"]],
+                           "blurb": ["type": "string", "description": String(repeating: "word ", count: 60)]],
+            "required": ["path"]]
+        let condensed = MCPFill.condenseSchema(fillSchema)
+        check("mcpfill condense required", condensed.contains("- path (string, required): the file path"))
+        check("mcpfill condense optional", condensed.contains("- head (number): first N lines"))
+        check("mcpfill condense enum", condensed.contains("- mode (one of: fast | safe)"))
+        check("mcpfill condense array", condensed.contains("- tags (list of string)"))
+        check("mcpfill condense truncates", condensed.range(of: #"blurb \(string\): (word )+word…"#, options: .regularExpression) != nil)
+        check("mcpfill condense empty schema", MCPFill.condenseSchema([:]).isEmpty)
+        let fillPrompt = MCPFill.prompt(goal: "read /tmp/x", toolName: "read_file", description: "Reads a file", schema: fillSchema)
+        check("mcpfill prompt worked example", fillPrompt.contains("\"title\": \"Hey Jude\""))
+        check("mcpfill prompt omission example", fillPrompt.contains("{\"count\": 3}"))
+        check("mcpfill prompt goal+tool", fillPrompt.contains("read /tmp/x") && fillPrompt.contains("read_file — Reads a file"))
+        check("mcpfill match string ci", Self.mcpFillMatches(got: " Asia/Tokyo ", want: "asia/tokyo"))
+        check("mcpfill match number", Self.mcpFillMatches(got: 20 as NSNumber, want: 20 as NSNumber))
+        check("mcpfill match int-vs-double", Self.mcpFillMatches(got: 20.0 as NSNumber, want: 20 as NSNumber))
+        check("mcpfill match any-of", Self.mcpFillMatches(got: "*invoice*", want: ["any": ["invoice", "*invoice*"]] as [String: Any]))
+        check("mcpfill match contains", Self.mcpFillMatches(got: "Mary Chen", want: ["contains": "mary"] as [String: Any]))
+        check("mcpfill match array", Self.mcpFillMatches(got: ["/tmp/a", "/tmp/b"], want: ["/tmp/a", "/tmp/b"]))
+        check("mcpfill match array order strict", !Self.mcpFillMatches(got: ["/tmp/b", "/tmp/a"], want: ["/tmp/a", "/tmp/b"]))
+        check("mcpfill match nil → false", !Self.mcpFillMatches(got: nil, want: "x"))
+        check("mcpfill match type mismatch", !Self.mcpFillMatches(got: "20", want: 20 as NSNumber))
         agentLog.info("selftest DONE: \(pass) pass, \(fail) fail")
     }
 
