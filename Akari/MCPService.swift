@@ -90,6 +90,47 @@ enum MCPConfig {
 /// (the house rule: abstract instructions fail on the 4B; proven twice).
 /// Prompt quality is eval-gated: `__mcpfilleval__` runs real dumped schemas
 /// (tools/mcp_schemas.json) against the live model.
+/// One tool from a connected MCP server, in plain Foundation types — safe to
+/// hold anywhere (no `import MCP` needed; schema is the raw JSON-Schema dict).
+struct MCPToolInfo {
+    let server: String
+    let name: String
+    let description: String
+    let schema: [String: Any]
+}
+
+/// Routing MCP tools into the recipe pipeline: the keyword prefilter that
+/// decides which tools the model gets to pick from (select-by-index — the
+/// model NEVER sees the full tool list, per the load-bearing rule).
+enum MCPRoute {
+    static let stopwords: Set<String> = ["the", "a", "an", "in", "on", "at", "to", "of", "my",
+                                         "me", "and", "or", "for", "with", "it", "is", "this",
+                                         "that", "please", "can", "you", "use", "using"]
+
+    static func tokens(_ s: String) -> [String] {
+        s.lowercased().components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { $0.count >= 2 && !stopwords.contains($0) }
+    }
+
+    /// Score = 3 per goal-token hit on the tool's NAME tokens + 1 per hit in
+    /// its description. Unlike recipes there are no curated keywords, so name
+    /// hits carry the weight; the ≥3 bar (a name hit, or several description
+    /// hits) keeps weak matches from hijacking the turn — below the bar the
+    /// goal falls through to the freeform loop.
+    static func prefilter(_ goal: String, tools: [MCPToolInfo], limit: Int = 5) -> [MCPToolInfo] {
+        let goalTokens = Set(tokens(goal))
+        guard !goalTokens.isEmpty else { return [] }
+        let scored = tools.compactMap { tool -> (MCPToolInfo, Int)? in
+            let nameTokens = Set(tokens(tool.name))
+            let descTokens = Set(tokens(tool.description))
+            let score = goalTokens.intersection(nameTokens).count * 3
+                      + goalTokens.intersection(descTokens).count
+            return score >= 3 ? (tool, score) : nil
+        }
+        return scored.sorted { $0.1 > $1.1 }.prefix(limit).map { $0.0 }
+    }
+}
+
 enum MCPFill {
     /// "- path (string, required): the file path" — one line per property.
     /// Enums render as the value list (the model must pick, not invent);
@@ -168,6 +209,9 @@ final class MCPService {
 
     private var servers: [String: ServerHandle] = [:]
     private var recentCrashes: [String: [Date]] = [:]
+    /// Tool list per server, keyed to the pid it was listed from — a
+    /// reconnected (fresh-pid) server re-lists automatically.
+    private var toolCache: [String: (pid: Int32, tools: [MCPToolInfo])] = [:]
 
     /// Connect to a server from mcp.json by its entry name (on-demand path —
     /// this is what the recipe pipeline and Routines will call).
@@ -270,6 +314,54 @@ final class MCPService {
     /// (`MCP.Tool` fully qualified — Akari has its own `Tool` type.)
     func listTools(_ handle: ServerHandle) async throws -> [MCP.Tool] {
         try await handle.client.listTools().tools
+    }
+
+    /// Every tool from every CONFIGURED server, as plain-Foundation MCPToolInfo —
+    /// the recipe pipeline's discovery call. Connects on demand (children stay
+    /// alive for later calls); tool lists are cached per live pid. A server that
+    /// fails to come up is skipped (logged), not fatal — the others still route.
+    func allConfiguredTools() async -> [MCPToolInfo] {
+        var all: [MCPToolInfo] = []
+        for config in MCPConfig.load() {
+            do {
+                let handle = try await connect(configuredName: config.name)
+                let pid = handle.process.processIdentifier
+                if let cached = toolCache[config.name], cached.pid == pid {
+                    all += cached.tools
+                    continue
+                }
+                let tools = try await listTools(handle).map { tool in
+                    MCPToolInfo(server: config.name,
+                                name: tool.name,
+                                description: tool.description ?? "",
+                                schema: foundationObject(tool.inputSchema) as? [String: Any] ?? [:])
+                }
+                toolCache[config.name] = (pid, tools)
+                all += tools
+            } catch {
+                mcpLog.error("mcp: \(config.name, privacy: .public) unavailable for discovery — \(error.localizedDescription, privacy: .public)")
+            }
+        }
+        return all
+    }
+
+    /// Call a tool with plain-Foundation arguments (the filled JSON object) on
+    /// a configured server — connects on demand if needed.
+    func callConfiguredTool(server: String, name: String, arguments: [String: Any]) async throws -> String {
+        let handle = try await connect(configuredName: server)
+        let data = try JSONSerialization.data(withJSONObject: arguments)
+        guard case .object(let args)? = try? JSONDecoder().decode(Value.self, from: data) else {
+            throw NSError(domain: "MCPService", code: 4,
+                          userInfo: [NSLocalizedDescriptionKey: "Arguments didn't convert to MCP values."])
+        }
+        return try await callTool(handle, name: name, arguments: args)
+    }
+
+    /// MCP `Value` → Foundation (via its Codable JSON form) — keeps `Value`
+    /// out of every file but this one.
+    private func foundationObject(_ value: Value?) -> Any? {
+        guard let value, let data = try? JSONEncoder().encode(value) else { return nil }
+        return try? JSONSerialization.jsonObject(with: data)
     }
 
     /// String-only convenience so callers never need MCP's `Value` type (it

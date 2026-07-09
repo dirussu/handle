@@ -752,6 +752,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // recipe fixes that). Keyword-gated, so non-recipe turns skip it with no cost.
         if await runRecipeIfMatched(goal: userText, in: conversation) { return }
 
+        // 2b. MCP path — same shape as recipes (prefilter → select-by-index →
+        // fill → confirm → audit) over the tools of the servers in mcp.json.
+        // No servers configured (or no keyword hit) = zero cost, falls through.
+        if await runMCPIfMatched(goal: userText, in: conversation) { return }
+
         // 2. Action loop. (Increment 1: only the read-only, no-permission
         // `recapture_screen` is wired; registry action tools are the next step.)
         let maxSteps = 5
@@ -1095,6 +1100,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 else if cmd == "__trigapptest__" { self?.runTrigAppTest() }
                 else if cmd == "__permstest__" { await self?.runPermsTest() }
                 else if cmd == "__mcpfilleval__" { await self?.runMCPFillEval() }
+                else if cmd.hasPrefix("__mcproute__ ") {
+                    // MCP ROUTE PROBE: discovery → prefilter → select-by-index →
+                    // fill, logging each stage. NO execution (mirror of __recipe__).
+                    guard let self else { return }
+                    let goal = String(cmd.dropFirst("__mcproute__ ".count))
+                    let tools = await MCPService.shared.allConfiguredTools()
+                    let candidates = MCPRoute.prefilter(goal, tools: tools)
+                    agentLog.info("mcproute: \(tools.count) tool(s) discovered, \(candidates.count) candidate(s): \(candidates.map { "\($0.server).\($0.name)" }.joined(separator: ", "), privacy: .public)")
+                    if let (tool, args) = await self.matchAndFillMCPTool(goal: goal) {
+                        agentLog.info("mcproute: SELECTED \(tool.server, privacy: .public).\(tool.name, privacy: .public) args=\(String(describing: args), privacy: .public)")
+                    } else {
+                        agentLog.info("mcproute: NO MATCH — would fall through to freeform")
+                    }
+                }
+                else if cmd.hasPrefix("__mcprun__ ") {
+                    // MCP E2E: the REAL runMCPIfMatched on a throwaway conversation,
+                    // with the confirm card auto-approved (DEBUG harness only) —
+                    // proves match → fill → confirm → call → audit + chip live.
+                    guard let self else { return }
+                    let goal = String(cmd.dropFirst("__mcprun__ ".count))
+                    let convo = Conversation(chatWithApp: "MCPTest")
+                    let approver = Task { @MainActor in
+                        for _ in 0..<600 {   // model select+fill runs first; card can take a while
+                            if let req = convo.pendingConfirmation {
+                                agentLog.info("mcprun: card shown — auto-approving")
+                                req.onDecision(true); return
+                            }
+                            try? await Task.sleep(for: .milliseconds(100))
+                        }
+                    }
+                    let handled = await self.runMCPIfMatched(goal: goal, in: convo)
+                    approver.cancel()
+                    let last = convo.visibleMessages.last.map(\.text) ?? "-"
+                    let chip = convo.visibleMessages.compactMap { $0.toolUses.first?.name }.last ?? "-"
+                    agentLog.info("mcprun: handled=\(handled) chip=\(chip, privacy: .public) last=\"\(last, privacy: .public)\"")
+                }
                 else if cmd.hasPrefix("__mcpconnect__") {
                     // Connect a configured server and LEAVE it running — for
                     // proving the quit path (terminateAllChildren) kills it.
@@ -1456,6 +1497,68 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             conversation.commitAssistantMessage("Done — \(recipe.title.lowercased()).")
         } catch {
             Task { await AuditLog.shared.record(tool: "recipe:\(recipe.id)", argsJSON: argsJSON, outcome: "error", summary: error.localizedDescription, confirmed: true) }
+            conversation.commitAssistantMessage("That didn't work — \(error.localizedDescription)")
+        }
+        return true
+    }
+
+    /// MCP MATCH — prefilter the configured servers' tools against the goal,
+    /// then (exactly like recipes) the model picks by INDEX, -1 = none. Returns
+    /// the tool + its filled arguments, or nil to fall through to freeform.
+    private func matchAndFillMCPTool(goal: String) async -> (tool: MCPToolInfo, args: [String: Any])? {
+        let tools = await MCPService.shared.allConfiguredTools()
+        let candidates = MCPRoute.prefilter(goal, tools: tools)
+        guard !candidates.isEmpty else { return nil }
+        let list = candidates.enumerated()
+            .map { "[\($0)] \($1.name) — \($1.description.prefix(100))" }.joined(separator: "\n")
+        let reply = await askModel("""
+        The user wants: "\(goal)"
+
+        Which tool best matches? Reply with ONLY the number of the best match, or -1 if NONE fit.
+        \(list)
+        """)
+        guard let idx = firstInt(in: reply), idx >= 0, idx < candidates.count else { return nil }
+        let tool = candidates[idx]
+        let fillReply = await askModel(MCPFill.prompt(goal: goal, toolName: tool.name,
+                                                      description: tool.description, schema: tool.schema))
+        var args: [String: Any] = [:]
+        for json in jsonObjectCandidates(in: fillReply) {
+            if let d = json.data(using: .utf8),
+               let obj = try? JSONSerialization.jsonObject(with: d) as? [String: Any] { args = obj; break }
+        }
+        return (tool, args)
+    }
+
+    /// MCP RUNNER — the live agentic path for configured MCP servers: match →
+    /// fill → confirm card (every argument visible) → call → audit + chip.
+    /// EVERY MCP call confirms: server tools are third-party code and we can't
+    /// know read from write, so the card is the safety floor (same standing as
+    /// run_applescript). Returns true if MCP handled the turn.
+    private func runMCPIfMatched(goal: String, in conversation: Conversation) async -> Bool {
+        guard let (tool, args) = await matchAndFillMCPTool(goal: goal) else { return false }
+        let label = "mcp:\(tool.server).\(tool.name)"
+        agentLog.info("mcp route: matched → \(label, privacy: .public) args=\(String(describing: args), privacy: .public)")
+        let argsJSON = (try? JSONSerialization.data(withJSONObject: args))
+            .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+        let rows = [("Connector", tool.server), ("Tool", tool.name)]
+                 + confirmRows(args: args)
+        let approved = await awaitConfirmation(in: conversation, title: confirmTitle(tool.name),
+                                               rows: rows, label: label)
+        if Task.isCancelled { return true }
+        guard approved else {
+            Task { await AuditLog.shared.record(tool: label, argsJSON: argsJSON, outcome: "declined", summary: "declined by user", confirmed: true) }
+            conversation.commitAssistantMessage("Okay, I've left that alone.")
+            return true
+        }
+        do {
+            let output = try await MCPService.shared.callConfiguredTool(server: tool.server, name: tool.name, arguments: args)
+            Task { await AuditLog.shared.record(tool: label, argsJSON: argsJSON, outcome: "ok", summary: tool.name, confirmed: true) }
+            let summary = "\(tool.server): \(tool.name.replacingOccurrences(of: "_", with: " "))"
+            conversation.addToolChip(name: label, inputJSON: argsJSON,
+                                     content: output.isEmpty ? "Done." : output, isError: false, displaySummary: summary)
+            conversation.commitAssistantMessage(output.isEmpty ? "Done — \(summary)." : output)
+        } catch {
+            Task { await AuditLog.shared.record(tool: label, argsJSON: argsJSON, outcome: "error", summary: error.localizedDescription, confirmed: true) }
             conversation.commitAssistantMessage("That didn't work — \(error.localizedDescription)")
         }
         return true
@@ -2022,6 +2125,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         check("mcpfill match array order strict", !Self.mcpFillMatches(got: ["/tmp/b", "/tmp/a"], want: ["/tmp/a", "/tmp/b"]))
         check("mcpfill match nil → false", !Self.mcpFillMatches(got: nil, want: "x"))
         check("mcpfill match type mismatch", !Self.mcpFillMatches(got: "20", want: 20 as NSNumber))
+        // MCP routing (v2 #1 increment ②) — the prefilter gate into select-by-index
+        let routeTools = [
+            MCPToolInfo(server: "fake", name: "echo", description: "Echo the given text back.", schema: [:]),
+            MCPToolInfo(server: "fake", name: "save_note", description: "Save a short note for later.", schema: [:]),
+            MCPToolInfo(server: "fake", name: "add_numbers", description: "Add two numbers and return the sum.", schema: [:]),
+        ]
+        check("mcproute tokens drop stopwords", MCPRoute.tokens("use the echo tool please") == ["echo", "tool"])
+        check("mcproute tokens split snake_case", MCPRoute.tokens("save_note") == ["save", "note"])
+        check("mcproute prefilter name hit", MCPRoute.prefilter("save a note about milk", tools: routeTools).first?.name == "save_note")
+        check("mcproute prefilter echo", MCPRoute.prefilter("echo back the word ping", tools: routeTools).first?.name == "echo")
+        check("mcproute prefilter numbers", MCPRoute.prefilter("add these two numbers", tools: routeTools).first?.name == "add_numbers")
+        check("mcproute prefilter no hijack", MCPRoute.prefilter("what's on my calendar today", tools: routeTools).isEmpty)
+        check("mcproute prefilter empty tools", MCPRoute.prefilter("save a note", tools: []).isEmpty)
+        check("mcproute prefilter caps at limit", MCPRoute.prefilter("save a note", tools: Array(repeating: routeTools[1], count: 9), limit: 5).count == 5)
         agentLog.info("selftest DONE: \(pass) pass, \(fail) fail")
     }
 
