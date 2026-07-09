@@ -1088,6 +1088,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 else if cmd == "__trigtest__" { self?.runTrigTest() }
                 else if cmd == "__trigapptest__" { self?.runTrigAppTest() }
                 else if cmd == "__permstest__" { await self?.runPermsTest() }
+                else if cmd.hasPrefix("__mcptest__") {
+                    // MCP client spike harness: spawn the fake stdio server (or a
+                    // given script path), initialize, list tools, call echo, tear down.
+                    let arg = cmd.dropFirst("__mcptest__".count).trimmingCharacters(in: .whitespaces)
+                    let script = arg.isEmpty
+                        ? NSHomeDirectory() + "/Developer/AI Cursor Project/Akari/tools/fake_mcp_server.py"
+                        : arg
+                    do {
+                        let handle = try await MCPService.shared.connect(
+                            name: "mcptest", command: "/usr/bin/python3", args: [script])
+                        let tools = try await MCPService.shared.listTools(handle)
+                        agentLog.info("mcptest: \(tools.count) tool(s): \(tools.map(\.name).joined(separator: ", "), privacy: .public)")
+                        let out = try await MCPService.shared.callTool(
+                            handle, name: "echo", textArguments: ["text": "hello from akari"])
+                        agentLog.info("mcptest: call → \"\(out, privacy: .public)\" (want \"echo: hello from akari\")")
+                        await MCPService.shared.disconnect(name: "mcptest")
+                        agentLog.info("mcptest: DONE")
+                    } catch {
+                        agentLog.error("mcptest: FAILED — \(error.localizedDescription, privacy: .public)")
+                    }
+                }
                 else if cmd == "__memtest__" {
                     // Round-trip + relevance on a THROWAWAY db.
                     let store = MemoryStore(filename: "memory_selftest.db")

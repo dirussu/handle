@@ -88,6 +88,7 @@
 				0B5BD5762FDFF0BE00CA19FA /* MLXLMCommon */,
 				0B5BD5782FDFF0BE00CA19FA /* MLXVLM */,
 				C1110A8DE0A6D8F83F9B0F99 /* WhisperKit */,
+				E22A44DCA616C03089177565 /* MCP */,
 			);
 			productName = Akari;
 			productReference = 0BC473C32FADFE4800A52524 /* Akari.app */;
@@ -122,6 +123,7 @@
 				0BC473FE2FAE1A1A00A52524 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */,
 				0B5BD5732FDFF0BE00CA19FA /* XCRemoteSwiftPackageReference "mlx-swift-examples" */,
 				08F15245FDEC7E02B21F863F /* XCRemoteSwiftPackageReference "WhisperKit" */,
+				D663C79DF05110E26B4F81D9 /* XCRemoteSwiftPackageReference "swift-sdk" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 0BC473C42FADFE4800A52524 /* Products */;
@@ -301,8 +303,8 @@
 				INFOPLIST_KEY_NSCalendarsUsageDescription = "Akari uses your calendar to create events you ask it to add — for example, when you screenshot an invite and ask Akari to schedule it.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSLocationUsageDescription = "Akari reads your Wi-Fi network name to run join-this-network automations. It never leaves your Mac.";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Akari transcribes your voice on-device (via Whisper) when you hold the talk key. The audio never leaves your Mac.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Akari reads your Wi-Fi network name to run join-this-network automations. It never leaves your Mac.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Akari transcribes your voice on-device (via Whisper) when you hold the talk key. The audio never leaves your Mac.";
 				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "Akari uses Reminders to create tasks you ask it to add — for example, turning a note or screenshot into a reminder.";
 				INFOPLIST_KEY_NSRemindersUsageDescription = "Akari uses Reminders to create tasks you ask it to add — for example, turning a note or screenshot into a reminder.";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -345,8 +347,8 @@
 				INFOPLIST_KEY_NSCalendarsUsageDescription = "Akari uses your calendar to create events you ask it to add — for example, when you screenshot an invite and ask Akari to schedule it.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSLocationUsageDescription = "Akari reads your Wi-Fi network name to run join-this-network automations. It never leaves your Mac.";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Akari transcribes your voice on-device (via Whisper) when you hold the talk key. The audio never leaves your Mac.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Akari reads your Wi-Fi network name to run join-this-network automations. It never leaves your Mac.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Akari transcribes your voice on-device (via Whisper) when you hold the talk key. The audio never leaves your Mac.";
 				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "Akari uses Reminders to create tasks you ask it to add — for example, turning a note or screenshot into a reminder.";
 				INFOPLIST_KEY_NSRemindersUsageDescription = "Akari uses Reminders to create tasks you ask it to add — for example, turning a note or screenshot into a reminder.";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -422,6 +424,14 @@
 				minimumVersion = 2.4.1;
 			};
 		};
+		D663C79DF05110E26B4F81D9 /* XCRemoteSwiftPackageReference "swift-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/modelcontextprotocol/swift-sdk.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.9.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -454,6 +464,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 08F15245FDEC7E02B21F863F /* XCRemoteSwiftPackageReference "WhisperKit" */;
 			productName = WhisperKit;
+		};
+		E22A44DCA616C03089177565 /* MCP */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = D663C79DF05110E26B4F81D9 /* XCRemoteSwiftPackageReference "swift-sdk" */;
+			productName = MCP;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
