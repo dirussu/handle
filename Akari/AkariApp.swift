@@ -96,6 +96,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         print("[Akari] Ready. Hover the notch, or double-tap ⌥ to capture.")
     }
 
+    func applicationWillTerminate(_ notification: Notification) {
+        // No async runway at quit — synchronously SIGTERM every MCP child so
+        // no orphan servers outlive Akari.
+        MCPService.shared.terminateAllChildren()
+    }
+
     // System (UNUserNotification) notifications REMOVED (founder call, 2026-07-07):
     // every completion signal goes through Akari's own notification center — the
     // pill + result cards under the notch. One interface, no duplicate banners,
@@ -1088,23 +1094,58 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 else if cmd == "__trigtest__" { self?.runTrigTest() }
                 else if cmd == "__trigapptest__" { self?.runTrigAppTest() }
                 else if cmd == "__permstest__" { await self?.runPermsTest() }
-                else if cmd.hasPrefix("__mcptest__") {
-                    // MCP client spike harness: spawn the fake stdio server (or a
-                    // given script path), initialize, list tools, call echo, tear down.
-                    let arg = cmd.dropFirst("__mcptest__".count).trimmingCharacters(in: .whitespaces)
-                    let script = arg.isEmpty
-                        ? NSHomeDirectory() + "/Developer/AI Cursor Project/Akari/tools/fake_mcp_server.py"
-                        : arg
+                else if cmd.hasPrefix("__mcpconnect__") {
+                    // Connect a configured server and LEAVE it running — for
+                    // proving the quit path (terminateAllChildren) kills it.
+                    let name = cmd.dropFirst("__mcpconnect__".count)
+                        .trimmingCharacters(in: .whitespaces).replacingOccurrences(of: "@", with: "")
                     do {
-                        let handle = try await MCPService.shared.connect(
-                            name: "mcptest", command: "/usr/bin/python3", args: [script])
-                        let tools = try await MCPService.shared.listTools(handle)
-                        agentLog.info("mcptest: \(tools.count) tool(s): \(tools.map(\.name).joined(separator: ", "), privacy: .public)")
-                        let out = try await MCPService.shared.callTool(
-                            handle, name: "echo", textArguments: ["text": "hello from akari"])
-                        agentLog.info("mcptest: call → \"\(out, privacy: .public)\" (want \"echo: hello from akari\")")
-                        await MCPService.shared.disconnect(name: "mcptest")
-                        agentLog.info("mcptest: DONE")
+                        let h = try await MCPService.shared.connect(configuredName: name)
+                        agentLog.info("mcpconnect: \(name, privacy: .public) up, pid=\(h.process.processIdentifier) — left connected")
+                    } catch {
+                        agentLog.error("mcpconnect: FAILED — \(error.localizedDescription, privacy: .public)")
+                    }
+                }
+                else if cmd.hasPrefix("__mcptest__") {
+                    // MCP harness. No arg / a script path = the transport spike
+                    // (direct spawn → list → call → disconnect). "@name" = the
+                    // config lifecycle: connect via mcp.json, call, then KILL the
+                    // child and prove reconnect-on-crash with a second call.
+                    let arg = cmd.dropFirst("__mcptest__".count).trimmingCharacters(in: .whitespaces)
+                    do {
+                        if arg.hasPrefix("@") {
+                            let name = String(arg.dropFirst())
+                            let h1 = try await MCPService.shared.connect(configuredName: name)
+                            let tools = try await MCPService.shared.listTools(h1)
+                            agentLog.info("mcptest[@\(name, privacy: .public)]: pid=\(h1.process.processIdentifier) \(tools.count) tool(s): \(tools.map(\.name).joined(separator: ", "), privacy: .public)")
+                            let out1 = try await MCPService.shared.callTool(
+                                h1, name: "echo", textArguments: ["text": "via config"])
+                            agentLog.info("mcptest: call#1 → \"\(out1, privacy: .public)\" (want \"echo: via config\")")
+                            // Crash it. terminationHandler must drop the handle;
+                            // the next connect must spawn a FRESH pid and work.
+                            kill(h1.process.processIdentifier, SIGKILL)
+                            try? await Task.sleep(for: .milliseconds(300))
+                            let h2 = try await MCPService.shared.connect(configuredName: name)
+                            let out2 = try await MCPService.shared.callTool(
+                                h2, name: "echo", textArguments: ["text": "after crash"])
+                            let respawned = h2.process.processIdentifier != h1.process.processIdentifier
+                            agentLog.info("mcptest: crash→reconnect pid \(h1.process.processIdentifier)→\(h2.process.processIdentifier) respawned=\(respawned) call#2 → \"\(out2, privacy: .public)\" (want \"echo: after crash\")")
+                            await MCPService.shared.disconnect(name: name)
+                            agentLog.info("mcptest: DONE")
+                        } else {
+                            let script = arg.isEmpty
+                                ? NSHomeDirectory() + "/Developer/AI Cursor Project/Akari/tools/fake_mcp_server.py"
+                                : arg
+                            let handle = try await MCPService.shared.connect(
+                                name: "mcptest", command: "/usr/bin/python3", args: [script])
+                            let tools = try await MCPService.shared.listTools(handle)
+                            agentLog.info("mcptest: \(tools.count) tool(s): \(tools.map(\.name).joined(separator: ", "), privacy: .public)")
+                            let out = try await MCPService.shared.callTool(
+                                handle, name: "echo", textArguments: ["text": "hello from akari"])
+                            agentLog.info("mcptest: call → \"\(out, privacy: .public)\" (want \"echo: hello from akari\")")
+                            await MCPService.shared.disconnect(name: "mcptest")
+                            agentLog.info("mcptest: DONE")
+                        }
                     } catch {
                         agentLog.error("mcptest: FAILED — \(error.localizedDescription, privacy: .public)")
                     }
@@ -1865,6 +1906,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         check("tts strip markdown", SpeechSynth.spokenForm("**Clicked** `Send` [link](x)") == "Clicked Send link")
         check("tts trims code", !SpeechSynth.spokenForm("hi ```swift\nlet x = 1\n``` bye").contains("let x"))
         check("tts caps length", SpeechSynth.spokenForm(String(repeating: "word. ", count: 500)).count <= 601)
+        // MCP config (v2 #1) — mcp.json parsing, command resolution, crash-loop guard
+        let mcpJSON = #"{"mcpServers":{"weather":{"command":"npx","args":["-y","weather-mcp"],"env":{"KEY":"x"}},"files":{"command":"/usr/bin/python3","args":["/tmp/s.py"]}}}"#
+        let mcpServers = MCPConfig.parse(Data(mcpJSON.utf8))
+        check("mcp parse count", mcpServers.count == 2)
+        check("mcp parse sorted", mcpServers.map(\.name) == ["files", "weather"])
+        check("mcp parse args", mcpServers.last?.args == ["-y", "weather-mcp"])
+        check("mcp parse env", mcpServers.last?.env == ["KEY": "x"])
+        check("mcp parse env defaults empty", mcpServers.first?.env == [:])
+        check("mcp parse malformed → []", MCPConfig.parse(Data("not json".utf8)).isEmpty)
+        check("mcp parse no-command skipped", MCPConfig.parse(Data(#"{"mcpServers":{"bad":{"args":[]}}}"#.utf8)).isEmpty)
+        check("mcp parse empty-command skipped", MCPConfig.parse(Data(#"{"mcpServers":{"bad":{"command":""}}}"#.utf8)).isEmpty)
+        check("mcp resolve absolute", MCPConfig.resolveInvocation(command: "/usr/bin/python3", args: ["a.py"]).executable == "/usr/bin/python3")
+        let bareInvocation = MCPConfig.resolveInvocation(command: "npx", args: ["-y", "x"])
+        check("mcp resolve bare → env", bareInvocation.executable == "/usr/bin/env" && bareInvocation.args == ["npx", "-y", "x"])
+        let mcpNow = Date()
+        check("mcp crashloop 3 in window", MCPConfig.isCrashLooping([mcpNow.addingTimeInterval(-1), mcpNow.addingTimeInterval(-5), mcpNow.addingTimeInterval(-30)], now: mcpNow))
+        check("mcp crashloop stale ok", !MCPConfig.isCrashLooping([mcpNow.addingTimeInterval(-120), mcpNow.addingTimeInterval(-90), mcpNow.addingTimeInterval(-70)], now: mcpNow))
+        check("mcp crashloop 2 ok", !MCPConfig.isCrashLooping([mcpNow.addingTimeInterval(-1), mcpNow.addingTimeInterval(-2)], now: mcpNow))
+        check("mcp crashloop none ok", !MCPConfig.isCrashLooping([], now: mcpNow))
+        check("mcp config path", MCPConfig.url.path.hasSuffix("Akari/mcp.json"))
         agentLog.info("selftest DONE: \(pass) pass, \(fail) fail")
     }
 
