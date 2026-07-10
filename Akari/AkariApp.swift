@@ -2165,6 +2165,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         check("mcproute prefilter no hijack", MCPRoute.prefilter("what's on my calendar today", tools: routeTools).isEmpty)
         check("mcproute prefilter empty tools", MCPRoute.prefilter("save a note", tools: []).isEmpty)
         check("mcproute prefilter caps at limit", MCPRoute.prefilter("save a note", tools: Array(repeating: routeTools[1], count: 9), limit: 5).count == 5)
+        // Family recall (the list_directory lesson): a weak desc-only hit joins
+        // the candidates when a strong hit opened the stage — but never alone.
+        let familyTools = routeTools + [
+            MCPToolInfo(server: "fs", name: "search_files", description: "Search for files matching a pattern.", schema: [:]),
+            MCPToolInfo(server: "fs", name: "list_directory", description: "Get a listing of all files and directories in a path.", schema: [:]),
+        ]
+        let familyHits = MCPRoute.prefilter("what files are inside my downloads folder", tools: familyTools)
+        check("mcproute family strong first", familyHits.first?.name == "search_files")
+        check("mcproute family weak included", familyHits.contains { $0.name == "list_directory" })
+        check("mcproute weak alone → empty", MCPRoute.prefilter("show my files", tools: [familyTools[4]]).isEmpty)   // desc-only score 1, no strong opener
         // MCP keychain refs (v2 #1 increment ③) — the pure sentinel parse;
         // SecItem round-trip + spawn-time resolution live in __keychaintest__.
         check("keychain ref parse", MCPKeychain.reference(in: "keychain:API_KEY") == "API_KEY")
@@ -2172,6 +2182,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         check("keychain ref plain → nil", MCPKeychain.reference(in: "sk-abc123") == nil)
         check("keychain ref empty name → nil", MCPKeychain.reference(in: "keychain:") == nil)
         check("keychain ref mid-string → nil", MCPKeychain.reference(in: "x keychain:Y") == nil)
+        // GUI-app PATH augmentation (v2 #1 increment ⑤) — npx/uvx findable from launchd's bare PATH
+        check("path augment appends", MCPConfig.augmentedPATH(base: "/usr/bin:/bin", extras: ["/opt/homebrew/bin"]) == "/usr/bin:/bin:/opt/homebrew/bin")
+        check("path augment dedups", MCPConfig.augmentedPATH(base: "/usr/bin:/opt/homebrew/bin", extras: ["/opt/homebrew/bin", "/x"]) == "/usr/bin:/opt/homebrew/bin:/x")
+        check("path extras have homebrew", MCPConfig.standardExtraDirs().contains("/opt/homebrew/bin"))
+        check("path extras find nvm node", MCPConfig.standardExtraDirs().contains { $0.contains("/.nvm/versions/node/") && $0.hasSuffix("/bin") })   // nvm is installed on this Mac
         agentLog.info("selftest DONE: \(pass) pass, \(fail) fail")
     }
 

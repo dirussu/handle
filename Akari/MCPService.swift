@@ -78,6 +78,30 @@ enum MCPConfig {
         command.hasPrefix("/") ? (command, args) : ("/usr/bin/env", [command] + args)
     }
 
+    /// A GUI app's PATH is launchd's bare `/usr/bin:/bin:…` — npx (nvm) and
+    /// uvx (homebrew) live outside it. Append the missing dirs (dedup, order
+    /// kept) so `/usr/bin/env` finds what a terminal would.
+    static func augmentedPATH(base: String, extras: [String]) -> String {
+        var seen = Set(base.split(separator: ":").map(String.init))
+        var path = base
+        for dir in extras where !seen.contains(dir) {
+            seen.insert(dir)
+            path += ":" + dir
+        }
+        return path
+    }
+
+    /// The standard tool homes on a Mac: homebrew, /usr/local, ~/.local/bin,
+    /// plus every installed nvm node version's bin (newest first, so the
+    /// freshest npx wins if several are installed).
+    static func standardExtraDirs(home: String = NSHomeDirectory()) -> [String] {
+        let nvmBase = home + "/.nvm/versions/node"
+        let nvmBins = ((try? FileManager.default.contentsOfDirectory(atPath: nvmBase)) ?? [])
+            .sorted { $0.compare($1, options: .numeric) == .orderedDescending }
+            .map { nvmBase + "/" + $0 + "/bin" }
+        return ["/opt/homebrew/bin", "/usr/local/bin", home + "/.local/bin"] + nvmBins
+    }
+
     /// 3+ exits inside 60s = a crash loop; stop respawning and surface it.
     static func isCrashLooping(_ crashes: [Date], now: Date) -> Bool {
         crashes.filter { now.timeIntervalSince($0) < 60 }.count >= 3
@@ -178,10 +202,13 @@ enum MCPRoute {
     }
 
     /// Score = 3 per goal-token hit on the tool's NAME tokens + 1 per hit in
-    /// its description. Unlike recipes there are no curated keywords, so name
-    /// hits carry the weight; the ≥3 bar (a name hit, or several description
-    /// hits) keeps weak matches from hijacking the turn — below the bar the
-    /// goal falls through to the freeform loop.
+    /// its description. ENTERING the stage requires one strong candidate
+    /// (score ≥3: a name hit, or several description hits) — that's the
+    /// no-hijack property, below it the goal falls through to freeform. But
+    /// once entered, WEAK candidates (score ≥1) join the list too: tool names
+    /// rarely match action-phrased goals ("what's inside X" never says
+    /// "list_directory" — the real filesystem server, 2026-07-10), and
+    /// select-by-index disambiguation is the model's proven strength.
     static func prefilter(_ goal: String, tools: [MCPToolInfo], limit: Int = 5) -> [MCPToolInfo] {
         let goalTokens = Set(tokens(goal))
         guard !goalTokens.isEmpty else { return [] }
@@ -190,9 +217,13 @@ enum MCPRoute {
             let descTokens = Set(tokens(tool.description))
             let score = goalTokens.intersection(nameTokens).count * 3
                       + goalTokens.intersection(descTokens).count
-            return score >= 3 ? (tool, score) : nil
+            return score >= 1 ? (tool, score) : nil
         }
-        return scored.sorted { $0.1 > $1.1 }.prefix(limit).map { $0.0 }
+        guard scored.contains(where: { $0.1 >= 3 }) else { return [] }
+        // Ties break by name so the candidate list is DETERMINISTIC run to run
+        // (Swift's sort isn't stable; a flaky list is an undebuggable eval).
+        return scored.sorted { $0.1 != $1.1 ? $0.1 > $1.1 : $0.0.name < $1.0.name }
+            .prefix(limit).map { $0.0 }
     }
 }
 
@@ -309,12 +340,15 @@ final class MCPService {
         let invocation = MCPConfig.resolveInvocation(command: command, args: args)
         proc.executableURL = URL(fileURLWithPath: invocation.executable)
         proc.arguments = invocation.args
+        var childEnv = ProcessInfo.processInfo.environment
+        childEnv["PATH"] = MCPConfig.augmentedPATH(base: childEnv["PATH"] ?? "/usr/bin:/bin",
+                                                   extras: MCPConfig.standardExtraDirs())
         if !env.isEmpty {
             // keychain: references resolve HERE, at spawn time — the secret
             // lives only in the child's environment, never in memory longer.
-            proc.environment = ProcessInfo.processInfo.environment
-                .merging(MCPKeychain.resolveEnv(env)) { _, new in new }
+            childEnv.merge(MCPKeychain.resolveEnv(env)) { _, new in new }
         }
+        proc.environment = childEnv
         let stdinPipe = Pipe()
         let stdoutPipe = Pipe()
         proc.standardInput = stdinPipe
