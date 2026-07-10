@@ -167,6 +167,20 @@ enum MCPKeychain {
         SecItemDelete(query as CFDictionary)
     }
 
+    /// The names (never the secrets) of every stored token — for Settings.
+    static func allNames() -> [String] {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecReturnAttributes as String: true,
+            kSecMatchLimit as String: kSecMatchLimitAll,
+        ]
+        var out: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &out) == errSecSuccess,
+              let items = out as? [[String: Any]] else { return [] }
+        return items.compactMap { $0[kSecAttrAccount as String] as? String }.sorted()
+    }
+
     /// Resolve every `keychain:` reference in a config env. A missing secret
     /// resolves to "" (and logs) rather than leaking the sentinel to the child.
     static func resolveEnv(_ env: [String: String]) -> [String: String] {
@@ -374,6 +388,10 @@ final class MCPService {
         servers[name] = handle
         return handle
     }
+
+    /// Settings UI reads: live connection state + the cached tool list.
+    func isConnected(name: String) -> Bool { servers[name]?.process.isRunning == true }
+    func cachedTools(name: String) -> [MCPToolInfo]? { toolCache[name]?.tools }
 
     /// Called from `terminationHandler` on ANY child exit. A deliberate
     /// `disconnect` removes the handle FIRST, so reaching here with the handle
