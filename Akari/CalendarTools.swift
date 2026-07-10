@@ -190,6 +190,19 @@ final class CalendarTools {
         return event
     }
 
+    /// Non-all-day events starting within the next `minutes` — the calendarSoon
+    /// trigger's poll. Returns [] without access (a timer must never prompt;
+    /// the permission is primed at save time while the user is present).
+    func eventsStartingSoon(within minutes: Int) -> [EKEvent] {
+        let status = EKEventStore.authorizationStatus(for: .event)
+        guard status == .fullAccess || status == .authorized else { return [] }
+        let now = Date()
+        let predicate = store.predicateForEvents(withStart: now,
+                                                 end: now.addingTimeInterval(TimeInterval(minutes * 60)),
+                                                 calendars: nil)
+        return store.events(matching: predicate).filter { !$0.isAllDay }
+    }
+
     func readEvents(from input: ReadEventsInput) throws -> [EKEvent] {
         guard let start = Self.parseDate(input.start_iso) else {
             throw CalendarToolError.invalidDate(input.start_iso)

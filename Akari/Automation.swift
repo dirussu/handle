@@ -31,13 +31,17 @@ struct Automation: Codable, Identifiable {
 /// A local-EVENT trigger (Phase 6, AGENTS.md) — the reactive counterpart to
 /// `AutomationSchedule`. Flat struct (not an enum) so Codable stays synthesized and
 /// old automations.json files (no `trigger` key) keep decoding. `kind` selects which
-/// fields matter: fileAppears | appLaunches | wifiConnects.
+/// fields matter: fileAppears | appLaunches | wifiConnects | windowMatches |
+/// calendarSoon | screenLocks (the v2 triggers batch).
 struct AutomationTrigger: Codable {
-    var kind: String       // "fileAppears" | "appLaunches" | "wifiConnects"
-    var folder: String?    // fileAppears: the watched folder (~-paths allowed)
-    var ext: String?       // fileAppears: extension filter, e.g. "pdf" (nil = any file)
-    var app: String?       // appLaunches: app name or bundle id, e.g. "zoom.us"
-    var ssid: String?      // wifiConnects: network name (nil = any Wi-Fi join)
+    var kind: String          // one of the kinds above
+    var folder: String?       // fileAppears: the watched folder (~-paths allowed)
+    var ext: String?          // fileAppears: extension filter, e.g. "pdf" (nil = any file)
+    var app: String?          // appLaunches: app name or bundle id, e.g. "zoom.us"
+    var ssid: String?         // wifiConnects: network name (nil = any Wi-Fi join)
+    var window: String?       // windowMatches: text the frontmost window's TITLE contains
+    var minutesBefore: Int?   // calendarSoon: lead time in minutes (default 10)
+    var state: String?        // screenLocks: "lock" (default) | "unlock"
 
     var describe: String {
         switch kind {
@@ -48,6 +52,12 @@ struct AutomationTrigger: Codable {
             return "when \(app ?? "?") opens"
         case "wifiConnects":
             return ssid.map { "when Wi-Fi joins “\($0)”" } ?? "when Wi-Fi connects"
+        case "windowMatches":
+            return "when a window titled “\(window ?? "?")” is in front"
+        case "calendarSoon":
+            return "\(minutesBefore ?? 10) min before a calendar event"
+        case "screenLocks":
+            return state == "unlock" ? "when the screen unlocks" : "when the screen locks"
         default:
             return kind
         }

@@ -1,6 +1,7 @@
 import Foundation
 import AppKit
 import CoreWLAN
+import EventKit
 import os.log
 
 private let trigLog = Logger(subsystem: "com.dimarussu.Akari", category: "Agent")
@@ -101,6 +102,9 @@ final class TriggerEngine {
     private var appLaunchObserver: NSObjectProtocol?
     private var wifiWatcher: WifiWatcher?
     private var lastSSID: String?
+    private var windowTimer: Timer?                       // windowMatches: 5s frontmost-title poll
+    private var calendarTimer: Timer?                     // calendarSoon: 60s upcoming-events poll
+    private var lockObservers: [NSObjectProtocol] = []    // screenLocks: distributed notifications
 
     static func expand(_ p: String) -> String { (p as NSString).expandingTildeInPath }
 
@@ -133,6 +137,25 @@ final class TriggerEngine {
 
     private static func normalized(_ s: String) -> String {
         s.lowercased().filter { $0.isLetter || $0.isNumber }
+    }
+
+    /// Does a frontmost-window title contain the trigger's `window` text? (ci)
+    static func windowTitleMatches(want: String?, title: String?) -> Bool {
+        guard let want, !want.isEmpty, let title, !title.isEmpty else { return false }
+        return title.lowercased().contains(want.lowercased())
+    }
+
+    /// Is an event starting soon enough to fire? Strictly in the future, within
+    /// the lead window — a 60s poll can't miss it (window ≥ tick), and an event
+    /// already started never fires.
+    static func calendarSoonDue(start: Date, now: Date, minutesBefore: Int) -> Bool {
+        let lead = start.timeIntervalSince(now)
+        return lead > 0 && lead <= TimeInterval(minutesBefore * 60)
+    }
+
+    /// Does a lock transition match the trigger's `state`? nil defaults to lock.
+    static func lockStateMatches(want: String?, locked: Bool) -> Bool {
+        (want ?? "lock") == (locked ? "lock" : "unlock")
     }
 
     private var enabledTriggers: [Automation] {
@@ -183,6 +206,52 @@ final class TriggerEngine {
         } else if !needsWifi {
             wifiWatcher = nil
         }
+
+        // windowMatches → one 5s frontmost-title poll while any exist. Polling
+        // because there's no system-wide "window focused" event without a per-app
+        // AX observer zoo; one title read per 5s is ~free and good enough for
+        // "when I'm in a Zoom meeting" use.
+        let needsWindow = triggers.contains { $0.trigger?.kind == "windowMatches" }
+        if needsWindow, windowTimer == nil {
+            windowTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { _ in
+                Task { @MainActor in
+                    let front = AccessibilityProbe.frontmostWindowTitle()
+                    TriggerEngine.shared.handleWindowTick(app: front.app, title: front.title)
+                }
+            }
+            trigLog.info("triggers: watching window titles")
+        } else if !needsWindow {
+            windowTimer?.invalidate(); windowTimer = nil
+        }
+
+        // calendarSoon → one 60s upcoming-events poll while any exist (lead
+        // windows are minutes, so a minute tick can't miss — see calendarSoonDue).
+        let needsCalendar = triggers.contains { $0.trigger?.kind == "calendarSoon" }
+        if needsCalendar, calendarTimer == nil {
+            calendarTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { _ in
+                Task { @MainActor in TriggerEngine.shared.handleCalendarTick() }
+            }
+            trigLog.info("triggers: watching upcoming calendar events")
+        } else if !needsCalendar {
+            calendarTimer?.invalidate(); calendarTimer = nil
+        }
+
+        // screenLocks → distributed-notification observers while any exist.
+        let needsLock = triggers.contains { $0.trigger?.kind == "screenLocks" }
+        if needsLock, lockObservers.isEmpty {
+            let center = DistributedNotificationCenter.default()
+            for (name, locked) in [("com.apple.screenIsLocked", true), ("com.apple.screenIsUnlocked", false)] {
+                lockObservers.append(center.addObserver(
+                    forName: Notification.Name(name), object: nil, queue: .main
+                ) { _ in
+                    Task { @MainActor in TriggerEngine.shared.handleLockChange(locked: locked) }
+                })
+            }
+            trigLog.info("triggers: watching screen lock/unlock")
+        } else if !needsLock, !lockObservers.isEmpty {
+            lockObservers.forEach { DistributedNotificationCenter.default().removeObserver($0) }
+            lockObservers = []
+        }
     }
 
     private func handleNewFiles(_ files: [String], in folder: String) {
@@ -209,6 +278,60 @@ final class TriggerEngine {
             recentFires.insert(key)
             trigLog.info("triggers: firing \"\(a.name, privacy: .public)\" — \(name ?? bundleID ?? "app", privacy: .public) launched")
             onFire?(a, ["trigger_app": name ?? bundleID ?? ""])
+        }
+    }
+
+    /// Fires windowMatches triggers for the current frontmost title. Deduped per
+    /// automation+title, so staying in (or returning to) the same window doesn't
+    /// refire; a different matching title does. Internal for `__trigwindowtest__`.
+    func handleWindowTick(app: String?, title: String?) {
+        guard let title, !title.isEmpty else { return }
+        for a in AutomationStore.shared.automations {
+            guard a.enabled, let t = a.trigger, t.kind == "windowMatches",
+                  Self.windowTitleMatches(want: t.window, title: title) else { continue }
+            let key = "\(a.id)|win|\(title)"
+            guard !recentFires.contains(key) else { continue }
+            recentFires.insert(key)
+            if recentFires.count > 500 { recentFires.removeAll() }
+            trigLog.info("triggers: firing \"\(a.name, privacy: .public)\" — window \"\(title, privacy: .public)\" (\(app ?? "?", privacy: .public))")
+            onFire?(a, ["trigger_window": title, "trigger_app": app ?? ""])
+        }
+    }
+
+    /// Fires calendarSoon triggers for events entering their lead window. Deduped
+    /// per automation+event occurrence, so each event fires ONCE. Internal for
+    /// `__trigcaltest__` (which feeds synthetic events).
+    func handleCalendarTick(events: [(id: String, title: String, start: Date)]? = nil, now: Date = Date()) {
+        let triggers = AutomationStore.shared.automations.filter { $0.enabled && $0.trigger?.kind == "calendarSoon" }
+        guard !triggers.isEmpty else { return }
+        let maxLead = triggers.map { $0.trigger?.minutesBefore ?? 10 }.max() ?? 10
+        let upcoming = events ?? CalendarTools.shared.eventsStartingSoon(within: maxLead)
+            .compactMap { e -> (id: String, title: String, start: Date)? in
+                guard let start = e.startDate else { return nil }
+                return (id: e.eventIdentifier ?? "\(e.title ?? "?")|\(start.timeIntervalSince1970)",
+                        title: e.title ?? "event", start: start)
+            }
+        for a in triggers {
+            let lead = a.trigger?.minutesBefore ?? 10
+            for e in upcoming where Self.calendarSoonDue(start: e.start, now: now, minutesBefore: lead) {
+                let key = "\(a.id)|cal|\(e.id)"
+                guard !recentFires.contains(key) else { continue }
+                recentFires.insert(key)
+                if recentFires.count > 500 { recentFires.removeAll() }
+                trigLog.info("triggers: firing \"\(a.name, privacy: .public)\" — \(e.title, privacy: .public) starts in \(Int(e.start.timeIntervalSince(now) / 60)) min")
+                onFire?(a, ["trigger_event": e.title, "trigger_event_minutes": String(Int(e.start.timeIntervalSince(now) / 60))])
+            }
+        }
+    }
+
+    /// Fires screenLocks triggers on a lock-state transition. Each transition is
+    /// a fresh event — no dedupe. Internal for `__triglocktest__`.
+    func handleLockChange(locked: Bool) {
+        for a in AutomationStore.shared.automations {
+            guard a.enabled, let t = a.trigger, t.kind == "screenLocks",
+                  Self.lockStateMatches(want: t.state, locked: locked) else { continue }
+            trigLog.info("triggers: firing \"\(a.name, privacy: .public)\" — screen \(locked ? "locked" : "unlocked", privacy: .public)")
+            onFire?(a, ["trigger_state": locked ? "lock" : "unlock"])
         }
     }
 

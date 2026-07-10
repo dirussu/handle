@@ -1098,6 +1098,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 else if cmd == "__schedtest__" { self?.runSchedTest() }
                 else if cmd == "__trigtest__" { self?.runTrigTest() }
                 else if cmd == "__trigapptest__" { self?.runTrigAppTest() }
+                else if cmd == "__trigbatchtest__" {
+                    // v2 TRIGGERS BATCH: save one automation per new kind, then
+                    // drive the REAL handlers with synthetic events (locking the
+                    // founder's screen / editing his calendar is off-limits) —
+                    // proves match → dedupe → fire → recipe run for all three.
+                    AutomationStore.shared.add(Automation(id: "trigwin", name: "window test", recipeId: "set-volume",
+                        paramsJSON: "{\"level\": 31}", trigger: AutomationTrigger(kind: "windowMatches", window: "Akari Probe")))
+                    AutomationStore.shared.add(Automation(id: "trigcal", name: "calendar test", recipeId: "set-volume",
+                        paramsJSON: "{\"level\": 32}", trigger: AutomationTrigger(kind: "calendarSoon", minutesBefore: 10)))
+                    AutomationStore.shared.add(Automation(id: "triglock", name: "lock test", recipeId: "set-volume",
+                        paramsJSON: "{\"level\": 33}", trigger: AutomationTrigger(kind: "screenLocks", state: "lock")))
+                    TriggerEngine.shared.refresh()
+                    agentLog.info("trigbatchtest: sources up — simulating events")
+                    // window: fires once, same title deduped, new title fires again
+                    TriggerEngine.shared.handleWindowTick(app: "TestApp", title: "Akari Probe — draft 1")
+                    TriggerEngine.shared.handleWindowTick(app: "TestApp", title: "Akari Probe — draft 1")   // deduped
+                    TriggerEngine.shared.handleWindowTick(app: "TestApp", title: "Akari Probe — draft 2")   // fires
+                    // calendar: one due event fires ONCE across two ticks; a far event never fires
+                    let synth = [(id: "ev1", title: "Standup", start: Date().addingTimeInterval(8 * 60)),
+                                 (id: "ev2", title: "Far away", start: Date().addingTimeInterval(90 * 60))]
+                    TriggerEngine.shared.handleCalendarTick(events: synth)
+                    TriggerEngine.shared.handleCalendarTick(events: synth)   // deduped
+                    // lock: lock fires the lock-state automation; unlock doesn't
+                    TriggerEngine.shared.handleLockChange(locked: true)
+                    TriggerEngine.shared.handleLockChange(locked: false)     // no match (state=lock)
+                    // real calendar read path (read-only, no prompt)
+                    let real = CalendarTools.shared.eventsStartingSoon(within: 120)
+                    agentLog.info("trigbatchtest: real calendar read — \(real.count) event(s) in next 2h")
+                    for id in ["trigwin", "trigcal", "triglock"] { AutomationStore.shared.remove(id: id) }
+                    TriggerEngine.shared.refresh()
+                    agentLog.info("trigbatchtest: DONE (want fires: window ×2, Standup ×1, lock ×1)")
+                }
                 else if cmd == "__permstest__" { await self?.runPermsTest() }
                 else if cmd == "__mcpfilleval__" { await self?.runMCPFillEval() }
                 else if cmd.hasPrefix("__routinesave__ ") {
@@ -1827,11 +1859,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// (Precision over recall — a miss falls through to recipes/action-loop.)
     private func hasEventTriggerHint(_ goal: String) -> Bool {
         let t = goal.lowercased()
+        // "10 minutes before my meeting, do X" carries no when/whenever — the
+        // lead-time phrasing IS the trigger framing (calendarSoon).
+        if ["minutes before", "min before", "minute before"].contains(where: { t.contains($0) }),
+           ["meeting", "event", "call", "appointment", "calendar"].contains(where: { t.contains($0) }) {
+            return true
+        }
         guard ["when ", "whenever ", "any time ", "anytime "].contains(where: { t.contains($0) }) else { return false }
         return ["file", "pdf", "screenshot", "image", "png", "download", "appears in",
                 "added to", "lands in", "saved to", "dropped in",
                 "open", "launch", "start", "quit",
-                "wifi", "wi-fi", "network", "connect", "join"].contains { t.contains($0) }
+                "wifi", "wi-fi", "network", "connect", "join",
+                "lock", "unlock", "window", "titled", "meeting", "call"].contains { t.contains($0) }
     }
 
     /// NL → {kind-specific trigger, task} via the local model (the same
@@ -1847,6 +1886,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         - event: the user opens/launches/starts an app → {"kind": "appLaunches", "app": "<that app's name>", "task": "<the do-Y action>"}
           (example: "when I open Mail, do Y" → {"kind": "appLaunches", "app": "Mail", "task": "do Y"})
         - event: joining a Wi-Fi network → {"kind": "wifiConnects", "ssid": <"the network name" or null for any network>, "task": "<the do-Y action>"}
+        - event: a window with some title text is in front → {"kind": "windowMatches", "window": "<that title text>", "task": "<the do-Y action>"}
+          (example: "when I'm in a Zoom meeting window, do Y" → {"kind": "windowMatches", "window": "Zoom Meeting", "task": "do Y"})
+        - event: shortly BEFORE a calendar event/meeting → {"kind": "calendarSoon", "minutesBefore": <the lead time in minutes, e.g. "10 minutes before"→10>, "task": "<the do-Y action>"}
+        - event: the screen locks or unlocks → {"kind": "screenLocks", "state": <"lock" or "unlock">, "task": "<the do-Y action>"}
         If it is NOT a when-X-do-Y request, reply with ONLY: none
         """)
         for json in jsonObjectCandidates(in: reply) {
@@ -1865,6 +1908,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 return (AutomationTrigger(kind: kind, app: app), task)
             case "wifiConnects":
                 return (AutomationTrigger(kind: kind, ssid: str("ssid")), task)
+            case "windowMatches":
+                guard let window = str("window") else { continue }
+                return (AutomationTrigger(kind: kind, window: window), task)
+            case "calendarSoon":
+                let lead = Self.intArg(o["minutesBefore"]).map { max(1, min(120, $0)) } ?? 10
+                return (AutomationTrigger(kind: kind, minutesBefore: lead), task)
+            case "screenLocks":
+                let state = str("state").flatMap { ["lock", "unlock"].contains($0) ? $0 : nil }
+                return (AutomationTrigger(kind: kind, state: state), task)
             default:
                 continue
             }
@@ -2345,6 +2397,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         check("routine auto excludes applescript", !routineAutoTools.contains { $0.name == "run_applescript" })
         check("routine auto excludes shell", !routineAutoTools.contains { $0.name == "run_shell" })
         check("routine auto excludes drafts", !routineAutoTools.contains { $0.name.hasPrefix("draft_") })
+        // Triggers batch (v2 #3) — matchers, due-window, describe, hint gate
+        check("trig window match ci", TriggerEngine.windowTitleMatches(want: "zoom meeting", title: "Zoom Meeting — Weekly Sync"))
+        check("trig window reject", !TriggerEngine.windowTitleMatches(want: "zoom", title: "Safari"))
+        check("trig window nil title", !TriggerEngine.windowTitleMatches(want: "zoom", title: nil))
+        check("trig window empty want", !TriggerEngine.windowTitleMatches(want: "", title: "anything"))
+        let trigNow = Date()
+        check("trig cal due inside", TriggerEngine.calendarSoonDue(start: trigNow.addingTimeInterval(8 * 60), now: trigNow, minutesBefore: 10))
+        check("trig cal not yet", !TriggerEngine.calendarSoonDue(start: trigNow.addingTimeInterval(15 * 60), now: trigNow, minutesBefore: 10))
+        check("trig cal started → no", !TriggerEngine.calendarSoonDue(start: trigNow.addingTimeInterval(-60), now: trigNow, minutesBefore: 10))
+        check("trig cal exact edge", TriggerEngine.calendarSoonDue(start: trigNow.addingTimeInterval(600), now: trigNow, minutesBefore: 10))
+        check("trig lock default", TriggerEngine.lockStateMatches(want: nil, locked: true))
+        check("trig lock unlock", TriggerEngine.lockStateMatches(want: "unlock", locked: false))
+        check("trig lock mismatch", !TriggerEngine.lockStateMatches(want: "unlock", locked: true))
+        check("trig describe window", AutomationTrigger(kind: "windowMatches", window: "Zoom Meeting").describe == "when a window titled “Zoom Meeting” is in front")
+        check("trig describe calendar", AutomationTrigger(kind: "calendarSoon", minutesBefore: 5).describe == "5 min before a calendar event")
+        check("trig describe cal default", AutomationTrigger(kind: "calendarSoon").describe == "10 min before a calendar event")
+        check("trig describe lock", AutomationTrigger(kind: "screenLocks").describe == "when the screen locks")
+        check("trig describe unlock", AutomationTrigger(kind: "screenLocks", state: "unlock").describe == "when the screen unlocks")
+        check("trigHint lock", hasEventTriggerHint("when I lock my screen, pause the music"))
+        check("trigHint window", hasEventTriggerHint("whenever a window titled invoice is in front, set volume to 20"))
+        check("trigHint minutes-before", hasEventTriggerHint("10 minutes before my next meeting, set the volume to 15"))
+        check("trigHint before-no-cal → false", !hasEventTriggerHint("10 minutes before lunch, remind me"))
+        check("trig legacy decode new fields nil", (try? JSONDecoder().decode(AutomationTrigger.self, from: Data(#"{"kind":"fileAppears","folder":"~/Downloads"}"#.utf8)))?.minutesBefore == nil)
         // MCP keychain refs (v2 #1 increment ③) — the pure sentinel parse;
         // SecItem round-trip + spawn-time resolution live in __keychaintest__.
         check("keychain ref parse", MCPKeychain.reference(in: "keychain:API_KEY") == "API_KEY")

@@ -270,6 +270,19 @@ enum AccessibilityProbe {
         }
     }
 
+    /// The frontmost app's focused-window title — the windowMatches trigger's
+    /// 5s poll. One AX read; (app, nil) when the window has no title.
+    static func frontmostWindowTitle() -> (app: String?, title: String?) {
+        guard AXIsProcessTrusted(),
+              let app = NSWorkspace.shared.frontmostApplication else { return (nil, nil) }
+        let appElement = AXUIElementCreateApplication(app.processIdentifier)
+        var focused: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(appElement, kAXFocusedWindowAttribute as CFString, &focused) == .success,
+              let raw = focused else { return (app.localizedName, nil) }
+        let window = unsafeBitCast(raw, to: AXUIElement.self)
+        return (app.localizedName, stringAttr(window, kAXTitleAttribute))
+    }
+
     private static func describe(element: AXUIElement) -> AXElement? {
         let role = stringAttr(element, kAXRoleAttribute) ?? ""
         let title = stringAttr(element, kAXTitleAttribute)
