@@ -3,6 +3,13 @@ import Foundation
 /// A saved, optionally-scheduled automation: a recipe + its filled params, approved
 /// ONCE at save time (standing consent) so a SCHEDULED run needs no confirm card
 /// (the user isn't there). Every run is still written to the audit log. See AGENTS.md.
+///
+/// Two payload kinds share this struct (flat, so Codable stays synthesized and old
+/// automations.json files keep decoding):
+/// - RECIPE (routineGoal == nil): resolved script, runs verbatim — deterministic.
+/// - ROUTINE (routineGoal != nil): an agentic GOAL; each run gathers fresh via
+///   read-only tools + MCP connectors, the local model synthesizes, and the result
+///   lands under the notch ("every morning, summarize my calendar"). v2 #2.
 struct Automation: Codable, Identifiable {
     var id: String
     var name: String
@@ -12,6 +19,13 @@ struct Automation: Codable, Identifiable {
     var trigger: AutomationTrigger?   // nil = no event trigger (see TriggerEngine)
     var enabled: Bool = true
     var lastRunKey: String = ""       // "yyyy-MM-dd-HH-mm" — dedupe so a minute fires once
+    var routineGoal: String?          // set = ROUTINE (see above); recipeId is ignored
+
+    /// A routine's display name: the goal's first line, capped like chat titles.
+    static func routineName(_ goal: String) -> String {
+        let firstLine = goal.split(separator: "\n").first.map(String.init) ?? goal
+        return String(firstLine.prefix(60))
+    }
 }
 
 /// A local-EVENT trigger (Phase 6, AGENTS.md) — the reactive counterpart to

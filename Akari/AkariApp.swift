@@ -1100,6 +1100,54 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 else if cmd == "__trigapptest__" { self?.runTrigAppTest() }
                 else if cmd == "__permstest__" { await self?.runPermsTest() }
                 else if cmd == "__mcpfilleval__" { await self?.runMCPFillEval() }
+                else if cmd.hasPrefix("__routinesave__ ") {
+                    // ROUTINE SAVE FLOW: the real turn path (parseSchedule → no
+                    // recipe → routine card, auto-approved) on a throwaway convo.
+                    guard let self else { return }
+                    let goal = String(cmd.dropFirst("__routinesave__ ".count))
+                    let convo = Conversation(chatWithApp: "RoutineTest")
+                    let approver = Task { @MainActor in
+                        for _ in 0..<600 {
+                            if let req = convo.pendingConfirmation {
+                                agentLog.info("routinesave: card shown — auto-approving")
+                                req.onDecision(true); return
+                            }
+                            try? await Task.sleep(for: .milliseconds(100))
+                        }
+                    }
+                    let handled = await self.saveScheduledAutomationIfRequested(goal: goal, in: convo)
+                    approver.cancel()
+                    let saved = AutomationStore.shared.automations.last
+                    agentLog.info("routinesave: handled=\(handled) saved=\"\(saved?.name ?? "-", privacy: .public)\" goal=\"\(saved?.routineGoal ?? "-", privacy: .public)\" when=\(saved?.schedule?.describe ?? "-", privacy: .public) last=\"\(convo.visibleMessages.last.map(\.text) ?? "-", privacy: .public)\"")
+                }
+                else if cmd == "__routineschedtest__" {
+                    // SCHEDULER→ROUTINE: persist a routine due ~70s out (no card,
+                    // DEBUG) and let the LIVE scheduler tick fire it — proves
+                    // tick → runRoutine → summary pill. Self-removes after.
+                    let c = Calendar.current.dateComponents([.hour, .minute], from: Date().addingTimeInterval(70))
+                    let a = Automation(id: "routineschedtest", name: "Routine sched test",
+                                       recipeId: "", paramsJSON: "{}",
+                                       schedule: AutomationSchedule(hour: c.hour ?? 8, minute: c.minute ?? 0, days: nil),
+                                       routineGoal: "summarize what's on my calendar today")
+                    AutomationStore.shared.add(a)
+                    agentLog.info("routineschedtest: saved, due \(a.schedule?.describe ?? "?", privacy: .public) — watch for the scheduler fire")
+                    Task { @MainActor in
+                        try? await Task.sleep(for: .seconds(150))
+                        AutomationStore.shared.remove(id: "routineschedtest")
+                        agentLog.info("routineschedtest: cleaned up")
+                    }
+                }
+                else if cmd.hasPrefix("__routinetest__ ") {
+                    // ROUTINE E2E: run an EPHEMERAL routine (not saved) through the
+                    // real fire path right now — gather → synthesize → pill.
+                    guard let self else { return }
+                    let goal = String(cmd.dropFirst("__routinetest__ ".count))
+                    let a = Automation(id: "routinetest", name: Automation.routineName(goal),
+                                       recipeId: "", paramsJSON: "{}", schedule: nil, routineGoal: goal)
+                    agentLog.info("routinetest: goal=\"\(goal, privacy: .public)\"")
+                    await self.runAutomation(a)
+                    agentLog.info("routinetest: DONE")
+                }
                 else if cmd == "__keychaintest__" {
                     // Keychain round-trip on a THROWAWAY item, then the full
                     // chain live: secret in Keychain → `keychain:` env reference
@@ -1626,7 +1674,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func saveScheduledAutomationIfRequested(goal: String, in conversation: Conversation) async -> Bool {
         guard let (schedule, task) = await parseSchedule(goal) else { return false }
         guard let recipe = await matchRecipe(goal: task) else {
-            conversation.commitAssistantMessage("I can schedule things, but I don't have a recipe for “\(task)” yet."); return true
+            // No recipe → offer a ROUTINE (v2 #2): the task saves as an agentic
+            // goal that runs fresh at each fire — gather (read-only tools + MCP)
+            // → synthesize → notch pill. One card = standing consent, audited.
+            return await saveRoutine(task: task, schedule: schedule, in: conversation)
         }
         let params = await fillParams(recipe: recipe, goal: task)
         let paramsJSON = (try? JSONSerialization.data(withJSONObject: params)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
@@ -1651,10 +1702,109 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return true
     }
 
+    /// ROUTINE SAVE — the standing-consent card for an agentic scheduled task,
+    /// then persist. The card is explicit that each run works UNSUPERVISED with
+    /// read-only tools + the user's connectors.
+    private func saveRoutine(task: String, schedule: AutomationSchedule, in conversation: Conversation) async -> Bool {
+        let approved = await awaitConfirmation(in: conversation, title: "Save routine?",
+            rows: [("When", schedule.describe),
+                   ("Task", task),
+                   ("How", "Each run, Akari gathers what it needs with read-only tools and your connectors, then puts a short result under the notch. No confirmations at run time — every step is audited.")],
+            label: "save-routine")
+        if Task.isCancelled { return true }
+        guard approved else { conversation.commitAssistantMessage("Okay, I didn't save it."); return true }
+        AutomationStore.shared.add(Automation(id: UUID().uuidString, name: Automation.routineName(task),
+                                              recipeId: "", paramsJSON: "{}", schedule: schedule,
+                                              routineGoal: task))
+        conversation.addToolChip(name: "routine", inputJSON: "{}",
+                                 content: "Scheduled \(schedule.describe)", isError: false, displaySummary: "Routine saved")
+        conversation.commitAssistantMessage("Saved — \(schedule.describe) I'll \(Automation.routineName(task).lowercased()) and leave the result under the notch.")
+        return true
+    }
+
+    /// ROUTINE RUN — the headless agentic pass (v2 #2): gather via one matched
+    /// MCP tool and/or a short read-only registry-tool loop, then the model
+    /// synthesizes a glanceable result for the notch pill. Standing consent:
+    /// NO cards fire — so only `.auto` (read-only / workspace-scoped) registry
+    /// tools may run; a `.confirm` tool named by the model is refused and
+    /// logged. Every step audits under "routine:<name>".
+    private func runRoutine(_ a: Automation) async -> String {
+        let goal = a.routineGoal ?? a.name
+        let auditLabel = "routine:\(a.name)"
+        var gathered: [String] = []
+
+        // 1. Connector gather — if a configured MCP tool matches the goal.
+        if let (tool, args) = await matchAndFillMCPTool(goal: goal) {
+            let argsJSON = (try? JSONSerialization.data(withJSONObject: args))
+                .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+            do {
+                let out = try await MCPService.shared.callConfiguredTool(server: tool.server, name: tool.name, arguments: args)
+                gathered.append("[\(tool.server).\(tool.name)]\n\(out)")
+                await AuditLog.shared.record(tool: auditLabel, argsJSON: argsJSON, outcome: "ok", summary: "mcp:\(tool.server).\(tool.name)", confirmed: true)
+            } catch {
+                await AuditLog.shared.record(tool: auditLabel, argsJSON: argsJSON, outcome: "error", summary: error.localizedDescription, confirmed: true)
+            }
+        }
+
+        // 2. Read-only registry loop — up to 3 gather steps, DONE to stop.
+        let autoTools = ToolRegistry.all.filter { $0.confirmation == .auto }
+        var lastSignature = ""
+        for _ in 0..<3 {
+            let material = gathered.isEmpty ? "(nothing yet)" : gathered.joined(separator: "\n\n")
+            let reply = await askModel("""
+            You are gathering information for this routine: "\(goal)"
+
+            Already gathered:
+            \(material)
+
+            Tools you may use:
+            \(ToolRegistry.promptSpec(for: autoTools))
+
+            If you still need information, reply with ONLY ONE tool call as JSON.
+            Example — routine "what's due today", nothing gathered yet:
+            {"name": "list_reminders", "arguments": {}}
+            If you have enough (or no tool fits), reply with ONLY: DONE
+            """)
+            guard let call = parseToolCall(reply) else { break }
+            guard let tool = ToolRegistry.tool(named: call.name), tool.confirmation == .auto else {
+                agentLog.info("routine: refused non-auto tool \(call.name, privacy: .public) (no cards at run time)")
+                break
+            }
+            let signature = call.name + ((try? JSONSerialization.data(withJSONObject: call.args)).flatMap { String(data: $0, encoding: .utf8) } ?? "")
+            if signature == lastSignature { break }   // repeat guard, same class as the chat loop's
+            lastSignature = signature
+            let result = await ToolRegistry.execute(name: call.name, args: call.args, in: Conversation(chatWithApp: ""))
+            gathered.append("[\(call.name)]\n\(result.content)")
+            await AuditLog.shared.record(tool: auditLabel, argsJSON: signature, outcome: result.isError ? "error" : "ok", summary: call.name, confirmed: true)
+            if result.isError { break }
+        }
+
+        // 3. Synthesize for the pill — or say plainly that nothing came back.
+        guard !gathered.isEmpty else {
+            await AuditLog.shared.record(tool: auditLabel, argsJSON: "{}", outcome: "error", summary: "nothing gathered", confirmed: true)
+            return "Routine “\(a.name)” ran, but no tool could gather anything for it."
+        }
+        let summary = await askModel("""
+        The routine "\(goal)" just ran. Its tools returned:
+
+        \(gathered.joined(separator: "\n\n"))
+
+        Write the result the user asked for — short and glanceable: 2–4 plain sentences, or up to 5 short lines. No preamble, no headers.
+        """)
+        let text = summary.trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty ? "Routine “\(a.name)” ran — but the summary came back empty." : String(text.prefix(800))
+    }
+
     /// Run a saved automation WITHOUT a card (standing consent granted at save time).
     /// `extra` carries trigger context (e.g. trigger_file = the new file's path) that
     /// substitutes into the body AFTER the recipe's own params.
     private func runAutomation(_ a: Automation, extra: [String: String] = [:]) async {
+        if a.routineGoal != nil {
+            let summary = await runRoutine(a)
+            NotchController.shared.notifyResult(summary)
+            agentLog.info("routine \(a.name, privacy: .public): delivered — \(summary.prefix(120), privacy: .public)")
+            return
+        }
         guard let recipe = RecipeStore.shared.recipes.first(where: { $0.id == a.recipeId }) else {
             agentLog.error("automation \(a.name, privacy: .public): recipe \(a.recipeId, privacy: .public) missing"); return
         }
@@ -1829,7 +1979,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             AutomationStore.shared.replace(updated)
             agentLog.info("scheduler: firing \"\(a.name, privacy: .public)\" (\(s.describe, privacy: .public))")
             await runAutomation(a)
-            if !NotchController.shared.isPanelOpen { NotchController.shared.notifyResult("Ran automation: \(a.name)") }
+            // Routines deliver their own summary pill inside runAutomation.
+            if a.routineGoal == nil, !NotchController.shared.isPanelOpen {
+                NotchController.shared.notifyResult("Ran automation: \(a.name)")
+            }
         }
     }
 
@@ -2175,6 +2328,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         check("mcproute family strong first", familyHits.first?.name == "search_files")
         check("mcproute family weak included", familyHits.contains { $0.name == "list_directory" })
         check("mcproute weak alone → empty", MCPRoute.prefilter("show my files", tools: [familyTools[4]]).isEmpty)   // desc-only score 1, no strong opener
+        // Routines (v2 #2) — model round-trip + the no-cards safety filter
+        let routine = Automation(id: "r1", name: Automation.routineName("summarize my calendar\nsecond line"),
+                                 recipeId: "", paramsJSON: "{}",
+                                 schedule: AutomationSchedule(hour: 8, minute: 0, days: nil), routineGoal: "summarize my calendar")
+        check("routine name = first line", routine.name == "summarize my calendar")
+        check("routine name capped 60", Automation.routineName(String(repeating: "x", count: 200)).count == 60)
+        let routineData = try? JSONEncoder().encode([routine])
+        let routineBack = routineData.flatMap { try? JSONDecoder().decode([Automation].self, from: $0) }?.first
+        check("routine codable roundtrip", routineBack?.routineGoal == "summarize my calendar")
+        let legacyJSON = #"[{"id":"a","name":"n","recipeId":"set-volume","paramsJSON":"{}","enabled":true,"lastRunKey":""}]"#
+        let legacy = (try? JSONDecoder().decode([Automation].self, from: Data(legacyJSON.utf8)))?.first
+        check("legacy automation decodes", legacy?.recipeId == "set-volume" && legacy?.routineGoal == nil)
+        let routineAutoTools = ToolRegistry.all.filter { $0.confirmation == .auto }
+        check("routine auto tools nonempty", !routineAutoTools.isEmpty)
+        check("routine auto excludes applescript", !routineAutoTools.contains { $0.name == "run_applescript" })
+        check("routine auto excludes shell", !routineAutoTools.contains { $0.name == "run_shell" })
+        check("routine auto excludes drafts", !routineAutoTools.contains { $0.name.hasPrefix("draft_") })
         // MCP keychain refs (v2 #1 increment ③) — the pure sentinel parse;
         // SecItem round-trip + spawn-time resolution live in __keychaintest__.
         check("keychain ref parse", MCPKeychain.reference(in: "keychain:API_KEY") == "API_KEY")

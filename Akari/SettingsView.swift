@@ -130,7 +130,7 @@ private struct AutomationsSection: View {
             } else {
                 ForEach(automations) { a in
                     HStack(spacing: 8) {
-                        Image(systemName: a.trigger != nil ? "bolt" : "clock.arrow.circlepath")
+                        Image(systemName: a.routineGoal != nil ? "sparkles" : (a.trigger != nil ? "bolt" : "clock.arrow.circlepath"))
                             .font(.system(size: 12)).foregroundStyle(.secondary).frame(width: 16)
                         VStack(alignment: .leading, spacing: 1) {
                             Text(a.name).font(.body)
