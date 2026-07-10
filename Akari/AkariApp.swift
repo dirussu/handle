@@ -1100,6 +1100,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 else if cmd == "__trigapptest__" { self?.runTrigAppTest() }
                 else if cmd == "__permstest__" { await self?.runPermsTest() }
                 else if cmd == "__mcpfilleval__" { await self?.runMCPFillEval() }
+                else if cmd == "__keychaintest__" {
+                    // Keychain round-trip on a THROWAWAY item, then the full
+                    // chain live: secret in Keychain → `keychain:` env reference
+                    // → resolved at spawn → visible in the CHILD's environment
+                    // (fake server's read_env tool). Cleaned up after.
+                    let key = "mcp-selftest-token", secret = "s3cret-akari-selftest"
+                    MCPKeychain.set(secret, for: key)
+                    let roundtrip = MCPKeychain.get(key) == secret
+                    agentLog.info("keychaintest: set+get roundtrip=\(roundtrip) (want true)")
+                    do {
+                        let script = NSHomeDirectory() + "/Developer/AI Cursor Project/Akari/tools/fake_mcp_server.py"
+                        let h = try await MCPService.shared.connect(
+                            name: "kctest", command: "/usr/bin/python3", args: [script],
+                            env: ["FAKE_TOKEN": "keychain:\(key)", "PLAIN_VAR": "plain-value"])
+                        let viaKeychain = try await MCPService.shared.callTool(
+                            h, name: "read_env", textArguments: ["name": "FAKE_TOKEN"])
+                        let plain = try await MCPService.shared.callTool(
+                            h, name: "read_env", textArguments: ["name": "PLAIN_VAR"])
+                        await MCPService.shared.disconnect(name: "kctest")
+                        agentLog.info("keychaintest: child sees FAKE_TOKEN=\"\(viaKeychain, privacy: .public)\" (want \"\(secret, privacy: .public)\") PLAIN_VAR=\"\(plain, privacy: .public)\" (want \"plain-value\")")
+                    } catch {
+                        agentLog.error("keychaintest: FAILED — \(error.localizedDescription, privacy: .public)")
+                    }
+                    MCPKeychain.delete(key)
+                    agentLog.info("keychaintest: after delete get=\(MCPKeychain.get(key) ?? "nil", privacy: .public) (want nil) DONE")
+                }
                 else if cmd.hasPrefix("__mcproute__ ") {
                     // MCP ROUTE PROBE: discovery → prefilter → select-by-index →
                     // fill, logging each stage. NO execution (mirror of __recipe__).
@@ -2139,6 +2165,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         check("mcproute prefilter no hijack", MCPRoute.prefilter("what's on my calendar today", tools: routeTools).isEmpty)
         check("mcproute prefilter empty tools", MCPRoute.prefilter("save a note", tools: []).isEmpty)
         check("mcproute prefilter caps at limit", MCPRoute.prefilter("save a note", tools: Array(repeating: routeTools[1], count: 9), limit: 5).count == 5)
+        // MCP keychain refs (v2 #1 increment ③) — the pure sentinel parse;
+        // SecItem round-trip + spawn-time resolution live in __keychaintest__.
+        check("keychain ref parse", MCPKeychain.reference(in: "keychain:API_KEY") == "API_KEY")
+        check("keychain ref trims", MCPKeychain.reference(in: "keychain: MY_TOKEN ") == "MY_TOKEN")
+        check("keychain ref plain → nil", MCPKeychain.reference(in: "sk-abc123") == nil)
+        check("keychain ref empty name → nil", MCPKeychain.reference(in: "keychain:") == nil)
+        check("keychain ref mid-string → nil", MCPKeychain.reference(in: "x keychain:Y") == nil)
         agentLog.info("selftest DONE: \(pass) pass, \(fail) fail")
     }
 

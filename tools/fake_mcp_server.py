@@ -3,11 +3,13 @@
 
 Speaks newline-delimited JSON-RPC over stdio (the MCP stdio transport) and
 implements the minimum surface: initialize, tools/list (echo / save_note /
-add_numbers), and tools/call. Deterministic and offline — the harness floor for
-MCPService and the routing path before any real community server is wired in.
+read_env / add_numbers), and tools/call. Deterministic and offline — the
+harness floor for MCPService, the routing path, and keychain-env resolution
+before any real community server is wired in.
 """
-import sys
 import json
+import os
+import sys
 
 
 def send(obj):
@@ -61,6 +63,15 @@ for line in sys.stdin:
                 },
             },
             {
+                "name": "read_env",
+                "description": "Read an environment variable of this server process by name.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {"name": {"type": "string", "description": "Variable name"}},
+                    "required": ["name"],
+                },
+            },
+            {
                 "name": "add_numbers",
                 "description": "Add two numbers and return the sum.",
                 "inputSchema": {
@@ -79,6 +90,8 @@ for line in sys.stdin:
         name = params.get("name")
         if name == "save_note":
             text = "note saved: " + str(args.get("text", ""))
+        elif name == "read_env":
+            text = os.environ.get(str(args.get("name", "")), "(unset)")
         elif name == "add_numbers":
             text = str(args.get("a", 0) + args.get("b", 0))
         else:

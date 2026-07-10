@@ -1,5 +1,6 @@
 import Foundation
 import MCP
+import Security
 import System
 import os.log
 
@@ -90,6 +91,70 @@ enum MCPConfig {
 /// (the house rule: abstract instructions fail on the 4B; proven twice).
 /// Prompt quality is eval-gated: `__mcpfilleval__` runs real dumped schemas
 /// (tools/mcp_schemas.json) against the live model.
+/// Secrets for MCP servers (increment ③). mcp.json stays claude-desktop
+/// compatible, but an env VALUE of the form `keychain:NAME` is resolved from
+/// the macOS Keychain at spawn time — the token itself never sits in the
+/// plaintext config. Items are generic passwords under one service name, so
+/// they're visible (and deletable) in Keychain Access.
+enum MCPKeychain {
+    static let service = "com.dimarussu.Akari.mcp"
+
+    /// "keychain:API_KEY" → "API_KEY"; anything else → nil. Pure (self-tested);
+    /// the SecItem calls below are covered by the live `__keychaintest__`.
+    static func reference(in value: String) -> String? {
+        guard value.hasPrefix("keychain:") else { return nil }
+        let name = String(value.dropFirst("keychain:".count)).trimmingCharacters(in: .whitespaces)
+        return name.isEmpty ? nil : name
+    }
+
+    /// Upsert one secret.
+    @discardableResult
+    static func set(_ secret: String, for name: String) -> Bool {
+        delete(name)
+        let attrs: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: name,
+            kSecValueData as String: Data(secret.utf8),
+        ]
+        return SecItemAdd(attrs as CFDictionary, nil) == errSecSuccess
+    }
+
+    static func get(_ name: String) -> String? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: name,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+        ]
+        var out: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &out) == errSecSuccess,
+              let data = out as? Data else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    static func delete(_ name: String) {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: name,
+        ]
+        SecItemDelete(query as CFDictionary)
+    }
+
+    /// Resolve every `keychain:` reference in a config env. A missing secret
+    /// resolves to "" (and logs) rather than leaking the sentinel to the child.
+    static func resolveEnv(_ env: [String: String]) -> [String: String] {
+        env.mapValues { value in
+            guard let name = reference(in: value) else { return value }
+            if let secret = get(name) { return secret }
+            mcpLog.error("mcp keychain: no item named \(name, privacy: .public) — env var sent empty")
+            return ""
+        }
+    }
+}
+
 /// One tool from a connected MCP server, in plain Foundation types — safe to
 /// hold anywhere (no `import MCP` needed; schema is the raw JSON-Schema dict).
 struct MCPToolInfo {
@@ -245,7 +310,10 @@ final class MCPService {
         proc.executableURL = URL(fileURLWithPath: invocation.executable)
         proc.arguments = invocation.args
         if !env.isEmpty {
-            proc.environment = ProcessInfo.processInfo.environment.merging(env) { _, new in new }
+            // keychain: references resolve HERE, at spawn time — the secret
+            // lives only in the child's environment, never in memory longer.
+            proc.environment = ProcessInfo.processInfo.environment
+                .merging(MCPKeychain.resolveEnv(env)) { _, new in new }
         }
         let stdinPipe = Pipe()
         let stdoutPipe = Pipe()
