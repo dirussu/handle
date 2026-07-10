@@ -1456,9 +1456,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         The user wants: "\(goal)"
 
         Which automation best matches? Reply with ONLY the number of the best match, or -1 if NONE fit.
+        Match the user's INTENT — asking ABOUT something is not the same as doing it. The user's \
+        specific values (names, paths, amounts) get filled in later, so an automation with input \
+        fields still matches.
+        Example — "mute the sound", [0] Set system volume, [1] Play a song: reply 0
+        Example — "what song is this", [0] Search and play a song, [1] Current track info: reply 1
+        Example — "order a pizza", [0] Empty the Trash, [1] Open a folder: reply -1
         \(list)
         """)
-        guard let idx = firstInt(in: reply) else { return nil }
+        let idx = firstInt(in: reply)
+        agentLog.info("recipe: select over \(candidates.count) [\(candidates.map(\.id).joined(separator: ", "), privacy: .public)] → reply \"\(reply.prefix(60), privacy: .public)\"")
+        guard let idx else { return nil }
         return (idx >= 0 && idx < candidates.count) ? candidates[idx] : nil
     }
 
