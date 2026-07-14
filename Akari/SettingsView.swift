@@ -6,7 +6,7 @@ import KeyboardShortcuts
 extension KeyboardShortcuts.Name {
     static let triggerCapture  = Self("triggerCapture")    // full-screen (chord alt for double-tap ⌥)
     static let demoMetaball    = Self("demoMetaball")      // TEMP — demo the pointer spit-out
-    static let pushToTalk      = Self("pushToTalk")        // HOLD to talk (voice command)
+    static let pushToTalk      = Self("pushToTalk")        // RETIRED (hold-⌥ replaced it) — kept so reset() can clear old bindings
 }
 
 /// Voice settings, UserDefaults-backed (read from non-UI code without SwiftUI).
@@ -82,17 +82,20 @@ struct SettingsBody: View {
     var body: some View {
         Form {
             Section {
-                LabeledContent("Default") {
+                LabeledContent("Capture") {
                     Text("Double-tap ⌥")
                         .foregroundStyle(.secondary)
                 }
+                LabeledContent("Talk") {
+                    Text("Hold ⌥")
+                        .foregroundStyle(.secondary)
+                }
                 KeyboardShortcuts.Recorder("Capture screen (chord):", name: .triggerCapture)
-                KeyboardShortcuts.Recorder("Hold to talk:", name: .pushToTalk)
                 VoiceReplyToggle()
             } header: {
                 SettingsHeader(icon: "keyboard", title: "Hotkeys")
             } footer: {
-                Text("Double-tap ⌥ captures the whole screen. Hold the talk key and speak a command — it's transcribed on-device (nothing audible leaves your Mac) and run like a typed one.")
+                Text("⌥ is the Akari key. Double-tap it to capture the whole screen; hold it and speak, then let go to run — transcribed on-device, nothing audible leaves your Mac. The hold cancels the moment you press any other key, so ⌥-shortcuts keep working.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

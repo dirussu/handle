@@ -110,10 +110,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Hotkey
 
     private func setupHotkey() {
-        // Default: double-tap ⌥ → full-screen capture
-        let monitor = HotkeyMonitor { [weak self] in
-            self?.handleCapture()
-        }
+        // ⌥ is the Akari key (founder, 2026-07-10 — "simpler than a chord"):
+        // double-tap → full-screen capture; HOLD ⌥ alone → talk, release to run.
+        let monitor = HotkeyMonitor(
+            onDoubleTap: { [weak self] in self?.handleCapture() },
+            onHoldBegan: { [weak self] in Task { @MainActor in await self?.beginVoiceCapture() } },
+            onHoldEnded: { [weak self] in Task { @MainActor in await self?.endVoiceCaptureAndRun() } })
         monitor.start()
         hotkeyMonitor = monitor
 
@@ -129,17 +131,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.runHighlightTest()
         }
 
-        // Push-to-talk: HOLD the shortcut to record, release to transcribe + run.
-        // Default ⌃⌥Space if unset; rebindable in Settings.
-        if KeyboardShortcuts.getShortcut(for: .pushToTalk) == nil {
-            KeyboardShortcuts.setShortcut(.init(.space, modifiers: [.control, .option]), for: .pushToTalk)
-        }
-        KeyboardShortcuts.onKeyDown(for: .pushToTalk) { [weak self] in
-            Task { @MainActor in await self?.beginVoiceCapture() }
-        }
-        KeyboardShortcuts.onKeyUp(for: .pushToTalk) { [weak self] in
-            Task { @MainActor in await self?.endVoiceCaptureAndRun() }
-        }
+        // The old ⌃⌥Space push-to-talk chord is gone — hold-⌥ replaced it.
+        // Clear any previously-seeded binding so it can't double-trigger.
+        KeyboardShortcuts.reset(.pushToTalk)
     }
 
     // MARK: - Voice (push-to-talk)
@@ -1076,6 +1070,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 else if cmd == "__schedtest__" { self?.runSchedTest() }
                 else if cmd == "__trigtest__" { self?.runTrigTest() }
                 else if cmd == "__trigapptest__" { self?.runTrigAppTest() }
+                else if cmd == "__holdopttest__" {
+                    // HOLD-⌥ GESTURE: drive the REAL HotkeyMonitor with synthetic
+                    // CGEvents. ① hold 0.7s alone → mic begins on threshold, ends
+                    // on release; ② ⌥+key chord → pending hold cancelled, no mic.
+                    func postOption(down: Bool) {
+                        let e = CGEvent(keyboardEventSource: nil, virtualKey: 58, keyDown: down)
+                        e?.flags = down ? .maskAlternate : []
+                        e?.post(tap: .cghidEventTap)
+                    }
+                    guard let self else { return }
+                    postOption(down: true)
+                    try? await Task.sleep(for: .milliseconds(650))
+                    agentLog.info("holdopttest: ① mid-hold recording=\(self.isVoiceRecording) (want true)")
+                    postOption(down: false)
+                    try? await Task.sleep(for: .seconds(3))   // release path transcribes + sucks
+                    agentLog.info("holdopttest: ① after release recording=\(self.isVoiceRecording) (want false)")
+                    postOption(down: true)
+                    try? await Task.sleep(for: .milliseconds(120))
+                    let arrow = CGEvent(keyboardEventSource: nil, virtualKey: 123, keyDown: true)
+                    arrow?.flags = .maskAlternate
+                    arrow?.post(tap: .cghidEventTap)
+                    let arrowUp = CGEvent(keyboardEventSource: nil, virtualKey: 123, keyDown: false)
+                    arrowUp?.flags = .maskAlternate
+                    arrowUp?.post(tap: .cghidEventTap)
+                    try? await Task.sleep(for: .milliseconds(700))
+                    agentLog.info("holdopttest: ② chord recording=\(self.isVoiceRecording) (want false)")
+                    postOption(down: false)
+                    try? await Task.sleep(for: .milliseconds(300))
+                    agentLog.info("holdopttest: DONE")
+                }
                 else if cmd == "__trigbatchtest__" {
                     // v2 TRIGGERS BATCH: save one automation per new kind, then
                     // drive the REAL handlers with synthetic events (locking the
