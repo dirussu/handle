@@ -95,7 +95,7 @@ struct SettingsBody: View {
             } header: {
                 SettingsHeader(icon: "keyboard", title: "Hotkeys")
             } footer: {
-                Text("⌥ is the Akari key. Double-tap it to capture the whole screen; hold it and speak, then let go to run — transcribed on-device, nothing audible leaves your Mac. The hold cancels the moment you press any other key, so ⌥-shortcuts keep working.")
+                Text("Speech is transcribed on-device — nothing audible leaves your Mac. Holding ⌥ cancels the instant you press another key, so ⌥-shortcuts keep working.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -169,7 +169,7 @@ private struct AutomationsSection: View {
         } header: {
             SettingsHeader(icon: "clock.arrow.circlepath", title: "Automations")
         } footer: {
-            Text("Automations run on their own — on a schedule or when a watched event happens (like a file appearing in a folder). Approved once when you saved them, recorded in Activity each time they fire. Toggle off to pause, or delete.")
+            Text("Approved once when saved; every run lands in Activity.")
                 .font(.caption).foregroundStyle(.secondary)
         }
         .onAppear { automations = AutomationStore.shared.automations }
@@ -234,7 +234,7 @@ private struct PermissionsSection: View {
         } header: {
             SettingsHeader(icon: "lock.shield", title: "Permissions")
         } footer: {
-            Text("Akari asks for each permission the first time a feature needs it — and when you save an automation, it asks to control the target apps right away, so a scheduled run never stalls on a hidden dialog. Everything stays on this Mac.")
+            Text("Asked for only when a feature first needs it. Saving an automation stages its permissions right away, so a scheduled run never stalls on a hidden dialog.")
                 .font(.caption).foregroundStyle(.secondary)
         }
         .task { await refresh() }
@@ -517,7 +517,7 @@ private struct MemorySection: View {
         } header: {
             SettingsHeader(icon: "brain", title: "Memory")
         } footer: {
-            Text("Facts you tell Akari to remember. The relevant ones are added to the prompt each turn. Stored locally in memory.db — never leaves your Mac.")
+            Text("Stored locally in memory.db — relevant facts join each turn's prompt, nothing leaves your Mac.")
                 .font(.caption).foregroundStyle(.secondary)
         }
         .task { await reload() }
@@ -574,7 +574,7 @@ private struct ActivitySection: View {
         } header: {
             SettingsHeader(icon: "list.bullet.rectangle", title: "Activity")
         } footer: {
-            Text("Every tool Akari runs is recorded locally to audit.jsonl and never leaves your Mac. The 20 most recent are shown.")
+            Text("Recorded locally to audit.jsonl — the 20 most recent shown here.")
                 .font(.caption).foregroundStyle(.secondary)
         }
         .task { entries = (await AuditLog.shared.recent(20)).reversed().compactMap(AuditEntry.init) }
@@ -652,7 +652,7 @@ private struct StorageSection: View {
         } header: {
             SettingsHeader(icon: "internaldrive", title: "Model storage")
         } footer: {
-            Text("The AI models live here (moveable to an external drive). A move takes effect the next time a model loads — quit and reopen Akari after moving.")
+            Text("A move takes effect after you quit and reopen Akari.")
                 .font(.caption).foregroundStyle(.secondary)
         }
         .onAppear(perform: refresh)
@@ -692,7 +692,7 @@ private struct PowerUserSection: View {
         } header: {
             SettingsHeader(icon: "terminal", title: "Power user")
         } footer: {
-            Text("With the shell tool on, Akari can run commands in /bin/zsh — npm, pip, brew, git, build scripts, etc. Every command shown to you for confirmation, scoped to allowed folders, with a 60s timeout. Off by default. Treat this like giving Akari a terminal.")
+            Text("Every command is shown for confirmation, runs only in allowed folders, and times out after 60 seconds. Treat it like handing Akari a terminal.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -720,7 +720,7 @@ private struct WorkspaceSection: View {
         } header: {
             SettingsHeader(icon: "folder", title: "Workspace")
         } footer: {
-            Text("Akari has standing read/write consent for this folder. File operations inside it run without per-call confirmation; destructive ops (delete, move) always confirm. Outside this folder, file operations are refused.")
+            Text("Standing read/write consent: file operations in this folder run without per-call confirmation (destructive ones still confirm). Outside it, they're refused.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -829,13 +829,16 @@ private struct IntegrationsSection: View {
                         .disabled(tokenName.trimmingCharacters(in: .whitespaces).isEmpty || tokenSecret.isEmpty)
                     Spacer()
                 }
+                Text("Reference it from mcp.json as keychain:NAME — the secret itself stays in the Keychain.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             } label: {
                 Text("Tokens").font(.body)
             }
         } header: {
             SettingsHeader(icon: "puzzlepiece.extension", title: "Integrations")
         } footer: {
-            Text("Connectors are MCP servers from mcp.json (the same format as Claude Desktop — paste entries from any server's README). They run as local child processes and stop when Akari quits. Every action they perform asks first. Secrets belong in the Keychain: save one here, then reference it in mcp.json as keychain:NAME instead of pasting the token.")
+            Text("Connectors run as local processes, stop when Akari quits, and every action they take asks first.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
