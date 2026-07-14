@@ -5,7 +5,6 @@ import KeyboardShortcuts
 
 extension KeyboardShortcuts.Name {
     static let triggerCapture  = Self("triggerCapture")    // full-screen (chord alt for double-tap ⌥)
-    static let captureRegion   = Self("captureRegion")     // drag-to-select region
     static let demoMetaball    = Self("demoMetaball")      // TEMP — demo the pointer spit-out
     static let pushToTalk      = Self("pushToTalk")        // HOLD to talk (voice command)
 }
@@ -88,13 +87,12 @@ struct SettingsBody: View {
                         .foregroundStyle(.secondary)
                 }
                 KeyboardShortcuts.Recorder("Capture screen (chord):", name: .triggerCapture)
-                KeyboardShortcuts.Recorder("Capture region (drag):", name: .captureRegion)
                 KeyboardShortcuts.Recorder("Hold to talk:", name: .pushToTalk)
                 VoiceReplyToggle()
             } header: {
                 SettingsHeader(icon: "keyboard", title: "Hotkeys")
             } footer: {
-                Text("Double-tap ⌥ captures the whole screen. The region chord opens a drag-to-select overlay. Hold the talk key and speak a command — it's transcribed on-device (nothing audible leaves your Mac) and run like a typed one.")
+                Text("Double-tap ⌥ captures the whole screen. Hold the talk key and speak a command — it's transcribed on-device (nothing audible leaves your Mac) and run like a typed one.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

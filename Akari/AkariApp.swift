@@ -112,19 +112,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func setupHotkey() {
         // Default: double-tap ⌥ → full-screen capture
         let monitor = HotkeyMonitor { [weak self] in
-            self?.handleCapture(mode: .fullScreen)
+            self?.handleCapture()
         }
         monitor.start()
         hotkeyMonitor = monitor
 
         // Optional rebindable chord for full-screen
         KeyboardShortcuts.onKeyDown(for: .triggerCapture) { [weak self] in
-            self?.handleCapture(mode: .fullScreen)
-        }
-
-        // Rebindable chord for region capture
-        KeyboardShortcuts.onKeyDown(for: .captureRegion) { [weak self] in
-            self?.handleCapture(mode: .region)
+            self?.handleCapture()
         }
 
         // TEMP — demo the metaball pointer spit-out (⌘⌥P). Remove when the
@@ -247,17 +242,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    enum CaptureMode { case fullScreen, region }
-
     @objc private func triggerCaptureFullScreen() {
-        handleCapture(mode: .fullScreen)
+        handleCapture()
     }
 
-    @objc private func triggerCaptureRegion() {
-        handleCapture(mode: .region)
-    }
-
-    private func handleCapture(mode: CaptureMode) {
+    // Region capture (drag-to-select) REMOVED (founder, 2026-07-10) — See is
+    // ambient full-screen; a second capture concept wasn't earning its keep.
+    private func handleCapture() {
         guard !isPresentingOverlay else { return }
         isPresentingOverlay = true
 
@@ -284,22 +275,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 return
             }
 
-            // 1. Determine the capture rect — either from a drag-select overlay
-            //    or the full screen, depending on mode.
-            let captureRect: CGRect
-            switch mode {
-            case .fullScreen:
-                captureRect = CGRect(origin: .zero, size: screen.frame.size)
-                print("[Akari] Mode: fullScreen — \(Int(captureRect.width))×\(Int(captureRect.height)) pt")
-            case .region:
-                let overlay = SelectionOverlay()
-                guard let dragged = await overlay.present(on: screen) else {
-                    print("[Akari] Selection cancelled.")
-                    return
-                }
-                captureRect = dragged
-                print("[Akari] Mode: region — \(captureRect)")
-            }
+            // 1. The capture rect: the full screen under the cursor.
+            let captureRect = CGRect(origin: .zero, size: screen.frame.size)
+            print("[Akari] Capture: \(Int(captureRect.width))×\(Int(captureRect.height)) pt")
 
             // 2. Capture pixels, then downsample for the API.
             let rawImage: CGImage
