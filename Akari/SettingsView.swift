@@ -111,6 +111,7 @@ struct SettingsBody: View {
             AboutSection()
         }
         .formStyle(.grouped)
+        .focusEffectDisabled()   // no macOS focus ring on any field — the thick halo reads as damage on the black surface
         .scrollIndicators(.never)   // kill the thick AppKit scroller — uniform with the rest
     }
 }
