@@ -227,8 +227,38 @@ final class Conversation {
     func appendChunk(at index: Int, _ chunk: String) {
         guard messages.indices.contains(index) else { return }
         var copy = messages
-        copy[index].text += chunk
+        copy[index].text += Self.withoutEmoji(chunk)
         messages = copy
+    }
+
+    /// Strip emoji from DISPLAYED chat text (founder call, 2026-07-10: the 4B
+    /// ignores "use emoji rarely" and half-ignores "do not use emoji" — probed
+    /// live; a deterministic strip is the only reliable dial). Applies to chat
+    /// bubbles only — tool payloads and file contents are never touched.
+    static func withoutEmoji(_ s: String) -> String {
+        guard s.unicodeScalars.contains(where: { isEmojiScalar($0) }) else { return s }
+        var scalars = String.UnicodeScalarView()
+        for scalar in s.unicodeScalars where !isEmojiScalar(scalar) {
+            scalars.append(scalar)
+        }
+        // The emoji usually rode in with a space ("welcome 🫶") — tidy the gaps.
+        return String(scalars)
+            .replacingOccurrences(of: "  ", with: " ")
+            .replacingOccurrences(of: "[ \\t]+(\\n)", with: "$1", options: .regularExpression)
+            .replacingOccurrences(of: "[ \\t]+$", with: "", options: .regularExpression)
+    }
+
+    private static func isEmojiScalar(_ s: Unicode.Scalar) -> Bool {
+        switch s.value {
+        case 0x1F000...0x1FAFF,     // the emoji planes (smileys, symbols, hands, …)
+             0x2600...0x27BF,       // misc symbols + dingbats (☀ ✨ ❤ …)
+             0x2B00...0x2BFF,       // more symbols (⭐ ⬆ …)
+             0x1F1E6...0x1F1FF,     // flag letters
+             0xFE0F, 0x200D:        // emoji variation selector + ZWJ
+            return true
+        default:
+            return s.properties.isEmojiPresentation   // digits/#/© stay (text presentation)
+        }
     }
 
     /// Add a brand-new tool_use block to the assistant message at `index`.
@@ -290,7 +320,7 @@ final class Conversation {
     /// for turns that were buffered off-screen (so a raw tool-call payload never
     /// shows): once the final plain-text answer is known, it's committed here.
     func commitAssistantMessage(_ text: String) {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = Self.withoutEmoji(text).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         messages.append(Message(role: .assistant, text: trimmed, isStreaming: false, image: nil))
     }

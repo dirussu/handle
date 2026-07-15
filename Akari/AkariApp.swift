@@ -890,7 +890,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     any cloud AI — say so plainly if asked about privacy. You can see the screen, point at and \
     click things, work with files, calendar, reminders, mail drafts and apps, and run automations \
     on schedules and triggers. You are Akari — not ChatGPT, not Claude, not any cloud service. \
-    Reply briefly and warmly in plain language, and never call yourself "just an AI".
+    Reply briefly and warmly in plain language, and never call yourself "just an AI". \
+    Do not use emoji. Don't introduce yourself or bring up privacy unless the user asks \
+    who you are or how their data is handled — in casual chat, just answer.
     """
 
     /// ONE model turn: See (image) or Ask (text). `instr` is extra context folded
@@ -1134,6 +1136,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 else if cmd == "__schedtest__" { self?.runSchedTest() }
                 else if cmd == "__trigtest__" { self?.runTrigTest() }
                 else if cmd == "__trigapptest__" { self?.runTrigAppTest() }
+                else if cmd.hasPrefix("__chatprobe__ ") {
+                    // One plain text turn straight through streamOneTurn — for
+                    // tone/wording checks without driving the GUI.
+                    guard let self else { return }
+                    let convo = Conversation(chatWithApp: "")
+                    convo.addUserMessage(String(cmd.dropFirst("__chatprobe__ ".count)))
+                    let reply = await self.streamOneTurn(in: convo, instr: "", display: false)
+                    // Log the DISPLAYED form — commit-time filtering (emoji strip) applied.
+                    agentLog.info("chatprobe → \(Conversation.withoutEmoji(reply).prefix(300), privacy: .public)")
+                }
                 else if cmd == "__identityeval__" {
                     // Identity block eval (EVALS.md): the questions Akari must
                     // never fumble, cold and at depth. Judged on "mentions
@@ -2456,6 +2468,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         check("identity names Akari", Self.akariIdentity.contains("You are Akari"))
         check("identity privacy claim", Self.akariIdentity.contains("never leave"))
         check("identity not-chatgpt", Self.akariIdentity.contains("not ChatGPT"))
+        // Emoji strip — displayed chat text only; text-presentation glyphs survive
+        check("emoji strip smiley", Conversation.withoutEmoji("Good morning! 🌞") == "Good morning!")
+        check("emoji strip mid-text", Conversation.withoutEmoji("welcome 🫶 back") == "welcome back")
+        check("emoji strip zwj seq", Conversation.withoutEmoji("hi 👩‍💻 there") == "hi there")
+        check("emoji keeps digits", Conversation.withoutEmoji("call 911 at 9:30") == "call 911 at 9:30")
+        check("emoji keeps arrows", Conversation.withoutEmoji("A → B") == "A → B")
+        check("emoji passthrough", Conversation.withoutEmoji("plain text") == "plain text")
         // MCP fill (v2 #1 increment ②) — schema condenser, fill prompt, eval matcher
         let fillSchema: [String: Any] = ["type": "object",
             "properties": ["path": ["type": "string", "description": "the file path"],
