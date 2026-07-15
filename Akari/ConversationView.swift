@@ -22,6 +22,7 @@ struct ConversationContent: View {
     let onStop: () -> Void
 
     @FocusState private var inputFocused: Bool
+    @State private var stopHover = false
     @Environment(\.accessibilityReduceMotion) private var reduce
     /// The transcript sizes to its content (snug) up to `maxTranscriptHeight`,
     /// then scrolls. The measured height is cached on the conversation
@@ -279,10 +280,14 @@ struct ConversationContent: View {
                                 .font(.system(size: 11, weight: .bold))
                                 .foregroundStyle(.white)
                                 .frame(width: 30, height: 30)
-                                .background(Circle().fill(Color.white.opacity(0.14)))
+                                // Solid-button hover = the fill lifts (the glyph is
+                                // already white, so the icon-brighten rule can't apply).
+                                .background(Circle().fill(Color.white.opacity(stopHover ? 0.24 : 0.14)))
                                 .contentShape(Circle())
                         }
                         .buttonStyle(.plain)
+                        .onHover { stopHover = $0 }
+                        .animation(AkariMotion.feedback, value: stopHover)
                         .help("Stop")
                     } else {
                         Button(action: submit) {
