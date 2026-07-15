@@ -566,17 +566,30 @@ private struct NotificationCenterView: View {
         .animation(AkariMotion.interactive, value: pillHover)
     }
 
-    private var collapseHandle: some View {
-        Button { withAnimation(reduce ? .easeOut(duration: 0.2) : AkariMotion.pop) { expanded = false } } label: {
+    private var collapseHandle: some View { CollapseHandle(reduce: reduce) { expanded = false } }
+}
+
+/// The capsule that folds the notification stack. Glyph-only brightening was
+/// invisible on a filled capsule this small (founder, 2026-07-10) — the whole
+/// capsule reacts: fill lifts, stroke brightens, chevron goes full white.
+private struct CollapseHandle: View {
+    let reduce: Bool
+    let collapse: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button { withAnimation(reduce ? .easeOut(duration: 0.2) : AkariMotion.pop) { collapse() } } label: {
             Image(systemName: "chevron.up")
                 .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(hovering ? .white : .white.opacity(0.7))
                 .frame(width: 46, height: 22)
-                .background(Color.black, in: Capsule())
-                .overlay { Capsule().strokeBorder(Color.white.opacity(0.12), lineWidth: 1) }
+                .background(hovering ? Color.white.opacity(0.12) : Color.black, in: Capsule())
+                .overlay { Capsule().strokeBorder(Color.white.opacity(hovering ? 0.28 : 0.12), lineWidth: 1) }
                 .contentShape(Capsule())
         }
         .buttonStyle(.plain)
-        .akariIconHover(idle: .white.opacity(0.7))
+        .onHover { hovering = $0 }
+        .animation(AkariMotion.feedback, value: hovering)
     }
 }
 
