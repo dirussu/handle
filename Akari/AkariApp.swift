@@ -2515,6 +2515,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // The exact live repro: the 4B corrupted the offset ("+02: soul"), the lenient
         // parser accepted it, and the clean re-call slipped past the byte guard.
         check("sig corrupt offset matches clean", Self.callSignature(name: "t", args: ["s": "2026-07-15T00:00:00+02: soul"]) == Self.callSignature(name: "t", args: ["s": "2026-07-15T00:00:00+02:00"]))
+        // Typewriter drain — text integrity across buffer → screen, all paths
+        check("drain amount floor", Conversation.drainAmount(backlog: 10) == 2)
+        check("drain amount scales", Conversation.drainAmount(backlog: 300) == 20)
+        let typeConvo = Conversation(chatWithApp: "")
+        typeConvo.addUserMessage("q")
+        let streamIdx = typeConvo.startAssistantStream()
+        typeConvo.appendChunk(at: streamIdx, "Hello, ")
+        typeConvo.appendChunk(at: streamIdx, "world! 🌍 Done.")
+        typeConvo.finishAssistantStream(at: streamIdx)
+        for _ in 0..<40 { typeConvo.drainOnce() }
+        check("drain full text lands", typeConvo.messages[streamIdx].text == "Hello, world! Done.")   // emoji stripped, nothing lost
+        check("drain finalizes stream", typeConvo.messages[streamIdx].isStreaming == false && typeConvo.isAwaitingResponse == false)
+        let stopConvo = Conversation(chatWithApp: "")
+        stopConvo.addUserMessage("q")
+        let stopIdx = stopConvo.startAssistantStream()
+        stopConvo.appendChunk(at: stopIdx, "partial answer that was still buffering")
+        stopConvo.stopStreaming()
+        check("stop flushes buffer", stopConvo.messages[stopIdx].text == "partial answer that was still buffering")
         // MCP fill (v2 #1 increment ②) — schema condenser, fill prompt, eval matcher
         let fillSchema: [String: Any] = ["type": "object",
             "properties": ["path": ["type": "string", "description": "the file path"],

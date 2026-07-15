@@ -224,11 +224,69 @@ final class Conversation {
     // and skip the macro-generated `withMutation` notification). Reading
     // `messages` and assigning the whole array back guarantees the setter
     // fires, which is what makes the live chat panel re-render mid-stream.
+    // Streaming presentation (founder, 2026-07-10: "typing isn't smooth"):
+    // model tokens arrive in BURSTS — several words, then a pause — and every
+    // burst re-parsed the markdown and re-laid-out the panel, which read as
+    // stutter. Deltas now land in a buffer and DRAIN to the visible text at a
+    // steady 30Hz, a few characters per tick (adaptive: a backlog drains in
+    // ~half a second, so display never falls far behind generation). Display
+    // is smooth regardless of generation rhythm.
+    private var streamBuffer = ""
+    private var streamIndex: Int?
+    private var streamFinished = false
+    private var drainTimer: Timer?
+
+    /// Characters per 30Hz tick: floor of 2 (a calm typewriter), scaling up
+    /// so any backlog clears in ~15 ticks (~0.5s).
+    static func drainAmount(backlog: Int) -> Int {
+        max(2, backlog / 15)
+    }
+
     func appendChunk(at index: Int, _ chunk: String) {
         guard messages.indices.contains(index) else { return }
-        var copy = messages
-        copy[index].text += Self.withoutEmoji(chunk)
-        messages = copy
+        streamIndex = index
+        streamBuffer += Self.withoutEmoji(chunk)
+        if drainTimer == nil {
+            drainTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
+                Task { @MainActor in self?.drainOnce() }
+            }
+        }
+    }
+
+    /// One 30Hz tick: move a few characters from the buffer to the screen.
+    /// Internal (not private) so the self-test can drive it deterministically.
+    func drainOnce() {
+        if let index = streamIndex, messages.indices.contains(index), !streamBuffer.isEmpty {
+            let take = String(streamBuffer.prefix(Self.drainAmount(backlog: streamBuffer.count)))
+            streamBuffer.removeFirst(take.count)
+            var copy = messages
+            copy[index].text += take
+            messages = copy
+        }
+        if streamBuffer.isEmpty {
+            drainTimer?.invalidate()
+            drainTimer = nil
+            if streamFinished, let index = streamIndex {
+                streamIndex = nil
+                streamFinished = false
+                finalizeAssistantStream(at: index)
+            }
+        }
+    }
+
+    /// Push everything still buffered to the screen NOW (cancel path — the
+    /// typewriter shouldn't swallow text that already arrived).
+    private func flushStreamBuffer() {
+        if let index = streamIndex, messages.indices.contains(index), !streamBuffer.isEmpty {
+            var copy = messages
+            copy[index].text += streamBuffer
+            messages = copy
+        }
+        streamBuffer = ""
+        streamIndex = nil
+        streamFinished = false
+        drainTimer?.invalidate()
+        drainTimer = nil
     }
 
     /// Strip emoji from DISPLAYED chat text (founder call, 2026-07-10: the 4B
@@ -291,7 +349,18 @@ final class Conversation {
         }
     }
 
+    /// The MODEL is done — but the typewriter may still be draining. Mark the
+    /// stream finished; the last drain tick finalizes (so the text never cuts
+    /// off mid-drain). With nothing buffered, finalizes immediately.
     func finishAssistantStream(at index: Int) {
+        if streamBuffer.isEmpty {
+            finalizeAssistantStream(at: index)
+        } else {
+            streamFinished = true
+        }
+    }
+
+    private func finalizeAssistantStream(at index: Int) {
         if messages.indices.contains(index) {
             var copy = messages
             copy[index].isStreaming = false
@@ -305,6 +374,7 @@ final class Conversation {
     /// called on EVERY loop exit so a cancelled turn never leaves the panel stuck
     /// "thinking," and directly by the user's Stop action.
     func stopStreaming() {
+        flushStreamBuffer()   // text that already arrived shows in full, instantly
         if let i = messages.lastIndex(where: { $0.isStreaming }) {
             var copy = messages
             copy[i].isStreaming = false
