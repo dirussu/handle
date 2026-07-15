@@ -758,6 +758,34 @@ private struct WorkspaceSection: View {
     }
 }
 
+/// One open-the-repo link row. Hovering ANYWHERE on the row brightens the
+/// arrow to white with the house feedback beat (the row is one target, so the
+/// per-icon akariIconHover — which only reacts over the glyph itself — would
+/// feel dead across the rest of the row).
+private struct AcknowledgementRow: View {
+    let lib: AppInfo.Acknowledgement
+    @State private var hovering = false
+    var body: some View {
+        Button {
+            NSWorkspace.shared.open(lib.url)
+        } label: {
+            HStack(spacing: 8) {
+                Text(lib.name).font(.body)
+                Spacer()
+                Text(lib.license)
+                    .font(.caption).foregroundStyle(.secondary)
+                Image(systemName: "arrow.up.right")
+                    .font(.system(size: 10))
+                    .foregroundStyle(hovering ? AnyShapeStyle(.white) : AnyShapeStyle(.tertiary))
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .animation(AkariMotion.feedback, value: hovering)
+        .onHover { hovering = $0 }
+    }
+}
+
 /// S M T W T F S toggle chips (1=Sun … 7=Sat, matching AutomationSchedule).
 /// Shared by the automation editor and the Settings creator form.
 private struct WeekdayPicker: View {
@@ -1001,20 +1029,7 @@ private struct AboutSection: View {
             }
             DisclosureGroup(isExpanded: $showLicenses) {
                 ForEach(AppInfo.acknowledgements) { lib in
-                    Button {
-                        NSWorkspace.shared.open(lib.url)
-                    } label: {
-                        HStack(spacing: 8) {
-                            Text(lib.name).font(.body)
-                            Spacer()
-                            Text(lib.license)
-                                .font(.caption).foregroundStyle(.secondary)
-                            Image(systemName: "arrow.up.right")
-                                .font(.system(size: 10)).foregroundStyle(.tertiary)
-                        }
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
+                    AcknowledgementRow(lib: lib)
                 }
             } label: {
                 Text("Acknowledgements").font(.body)
