@@ -81,6 +81,11 @@ struct ConversationContent: View {
                     // own top padding covers the empty state. Applied before the height
                     // measurement so the transcript frame accounts for it.
                     .padding(.top, conversation.visibleMessages.isEmpty ? 0 : AkariSpacing.xxl)
+                    // Clear the BOTTOM fade zone at rest (the Chats-list trick):
+                    // scrolled to the newest message, its last line sits above the
+                    // fade and stays crisp; the fade only melts content that is
+                    // actually scrolling out under the input bar.
+                    .padding(.bottom, conversation.visibleMessages.isEmpty ? 0 : 20)
                     .background(
                         GeometryReader { geo in
                             Color.clear.preference(key: TranscriptHeightKey.self, value: geo.size.height)
@@ -95,7 +100,7 @@ struct ConversationContent: View {
                 // Form's thick AppKit scroller clashed with the slim overlays).
                 // The scroll edge fade is the "more content" affordance.
                 .scrollIndicators(.never)
-                .scrollEdgeFade(top: 24, bottom: 0)   // fade under the header; keep the latest reply crisp
+                .scrollEdgeFade()   // both edges — content melts under the header AND above the input bar (bottom padding keeps the resting reply out of the fade)
                 .onPreferenceChange(TranscriptHeightKey.self) { conversation.transcriptHeight = $0 }
                 .onChange(of: lastMessageText) {
                     withAnimation(AkariMotion.swap) {
