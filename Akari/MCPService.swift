@@ -49,7 +49,11 @@ enum MCPConfig {
     static func parse(_ data: Data) -> [MCPServerConfig] {
         guard let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
               let entries = root["mcpServers"] as? [String: Any] else { return [] }
-        return entries.compactMap { name, raw -> MCPServerConfig? in
+        return configs(fromEntries: entries)
+    }
+
+    private static func configs(fromEntries entries: [String: Any]) -> [MCPServerConfig] {
+        entries.compactMap { name, raw -> MCPServerConfig? in
             guard let entry = raw as? [String: Any],
                   let command = entry["command"] as? String, !command.isEmpty else {
                 mcpLog.error("mcp config: entry \(name, privacy: .public) has no command — skipped")
@@ -60,6 +64,57 @@ enum MCPConfig {
                                    args: entry["args"] as? [String] ?? [],
                                    env: entry["env"] as? [String: String] ?? [:])
         }.sorted { $0.name < $1.name }
+    }
+
+    /// What Settings' "Add a connector" paste box accepts — the shapes READMEs
+    /// actually show: the whole `{"mcpServers": {...}}` file, or the bare
+    /// `{"name": {"command": ...}}` fragment. Returns the VALID entries' raw
+    /// dicts (unknown per-entry keys survive the round-trip to disk).
+    static func parseSnippet(_ text: String) -> [String: [String: Any]] {
+        guard let data = text.data(using: .utf8),
+              let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return [:] }
+        let entries = (root["mcpServers"] as? [String: Any]) ?? root
+        var out: [String: [String: Any]] = [:]
+        for (name, raw) in entries {
+            guard let entry = raw as? [String: Any],
+                  let command = entry["command"] as? String, !command.isEmpty else { continue }
+            out[name] = entry
+        }
+        return out
+    }
+
+    /// Merge snippet entries into the config file (created if missing; other
+    /// top-level keys preserved; same-name entries overwritten). Returns the
+    /// added names, [] when the snippet had no valid entry.
+    @discardableResult
+    static func addServers(fromSnippet text: String, to fileURL: URL = MCPConfig.url) -> [String] {
+        let additions = parseSnippet(text)
+        guard !additions.isEmpty else { return [] }
+        var root = (try? Data(contentsOf: fileURL))
+            .flatMap { (try? JSONSerialization.jsonObject(with: $0)) as? [String: Any] } ?? [:]
+        var entries = root["mcpServers"] as? [String: Any] ?? [:]
+        for (name, entry) in additions { entries[name] = entry }
+        root["mcpServers"] = entries
+        write(root, to: fileURL)
+        return additions.keys.sorted()
+    }
+
+    /// Remove one entry (no-op when absent).
+    static func removeServer(named name: String, from fileURL: URL = MCPConfig.url) {
+        guard var root = (try? Data(contentsOf: fileURL))
+            .flatMap({ (try? JSONSerialization.jsonObject(with: $0)) as? [String: Any] }),
+              var entries = root["mcpServers"] as? [String: Any] else { return }
+        entries.removeValue(forKey: name)
+        root["mcpServers"] = entries
+        write(root, to: fileURL)
+    }
+
+    private static func write(_ root: [String: Any], to fileURL: URL) {
+        try? FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(),
+                                                 withIntermediateDirectories: true)
+        if let data = try? JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .sortedKeys]) {
+            try? data.write(to: fileURL)
+        }
     }
 
     /// The configured servers on disk (no file → none configured).

@@ -2338,6 +2338,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         check("mcp crashloop 2 ok", !MCPConfig.isCrashLooping([mcpNow.addingTimeInterval(-1), mcpNow.addingTimeInterval(-2)], now: mcpNow))
         check("mcp crashloop none ok", !MCPConfig.isCrashLooping([], now: mcpNow))
         check("mcp config path", MCPConfig.url.path.hasSuffix("Akari/mcp.json"))
+        // Add-a-connector paste box (founder ask): both README shapes parse;
+        // add/remove round-trips a THROWAWAY file, never the real config.
+        check("mcp snippet full form", MCPConfig.parseSnippet(#"{"mcpServers":{"w":{"command":"npx","args":["-y","w"]}}}"#).keys.sorted() == ["w"])
+        check("mcp snippet bare form", MCPConfig.parseSnippet(#"{"w":{"command":"npx"},"x":{"command":"uvx"}}"#).keys.sorted() == ["w", "x"])
+        check("mcp snippet junk → empty", MCPConfig.parseSnippet("paste your json here").isEmpty)
+        check("mcp snippet no-command → empty", MCPConfig.parseSnippet(#"{"w":{"args":["-y"]}}"#).isEmpty)
+        let mcpTmp = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("mcp_selftest.json")
+        try? FileManager.default.removeItem(at: mcpTmp)
+        check("mcp add creates file", MCPConfig.addServers(fromSnippet: #"{"a":{"command":"npx","env":{"K":"v"}}}"#, to: mcpTmp) == ["a"])
+        check("mcp add merges", MCPConfig.addServers(fromSnippet: #"{"mcpServers":{"b":{"command":"uvx"}}}"#, to: mcpTmp) == ["b"])
+        let mcpRead = (try? Data(contentsOf: mcpTmp)).map(MCPConfig.parse) ?? []
+        check("mcp add round-trip", mcpRead.map(\.name) == ["a", "b"] && mcpRead.first?.env == ["K": "v"])
+        MCPConfig.removeServer(named: "a", from: mcpTmp)
+        check("mcp remove", ((try? Data(contentsOf: mcpTmp)).map(MCPConfig.parse) ?? []).map(\.name) == ["b"])
+        try? FileManager.default.removeItem(at: mcpTmp)
         // MCP fill (v2 #1 increment ②) — schema condenser, fill prompt, eval matcher
         let fillSchema: [String: Any] = ["type": "object",
             "properties": ["path": ["type": "string", "description": "the file path"],

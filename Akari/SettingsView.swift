@@ -104,10 +104,10 @@ struct SettingsBody: View {
             ActivitySection()
             MemorySection()
             WorkspaceSection()
-            IntegrationsSection()
             PermissionsSection()
             StorageSection()
             PowerUserSection()
+            IntegrationsSection()   // advanced territory (founder call) — lives with Power User
             AboutSection()
         }
         .formStyle(.grouped)
@@ -782,6 +782,9 @@ private struct IntegrationsSection: View {
     @State private var configs: [MCPServerConfig] = MCPConfig.load()
     @State private var status: [String: String] = [:]
     @State private var checking: Set<String> = []
+    @State private var showAddForm = false
+    @State private var addText = ""
+    @State private var addError: String?
     @State private var showTokenForm = false
     @State private var tokenName = ""
     @State private var tokenSecret = ""
@@ -823,16 +826,41 @@ private struct IntegrationsSection: View {
                                 .akariIconHover(idle: Color(nsColor: .secondaryLabelColor))
                                 .help("Disconnect")
                             }
+                            Button { remove(c.name) } label: {
+                                Image(systemName: "trash").font(.system(size: 12))
+                            }
+                            .buttonStyle(.borderless)
+                            .akariIconHover()
+                            .help("Remove this connector")
                         }
                     }
                 }
             }
-            HStack(spacing: 8) {
-                Button("Open mcp.json", action: openConfig)
-                    .buttonStyle(.akariSolid)
-                Button("Reload", action: reload)
-                    .buttonStyle(.akariSolid)
-                Spacer()
+            if showAddForm {
+                VStack(alignment: .leading, spacing: 8) {
+                    TextField("Paste the server's JSON from its README", text: $addText, axis: .vertical)
+                        .font(.system(size: 11, design: .monospaced))
+                        .lineLimit(3...8)
+                    if let addError {
+                        Text(addError).font(.caption).foregroundStyle(.red)
+                    }
+                    HStack(spacing: 8) {
+                        Button("Add", action: add).buttonStyle(.akariSolid)
+                            .disabled(addText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        Button("Cancel") { showAddForm = false; addText = ""; addError = nil }
+                            .buttonStyle(.borderless)
+                        Spacer()
+                    }
+                }
+                .padding(.vertical, 4)
+            } else {
+                HStack(spacing: 8) {
+                    Button("Add a connector…") { showAddForm = true }
+                        .buttonStyle(.akariSolid)
+                    Button("Open mcp.json", action: openConfig)
+                        .buttonStyle(.akariSolid)
+                    Spacer()
+                }
             }
             DisclosureGroup(isExpanded: $showTokenForm) {
                 if !tokenNames.isEmpty {
@@ -862,6 +890,31 @@ private struct IntegrationsSection: View {
             Text("Connectors run as local processes, stop when Akari quits, and every action they take asks first.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+        }
+        .onAppear { reload() }   // pick up hand-edits to mcp.json
+    }
+
+    /// Parse the pasted snippet, write it into mcp.json, then immediately
+    /// test-connect each added server so the row shows "Running — N tools"
+    /// (or the real error) without another click.
+    private func add() {
+        let added = MCPConfig.addServers(fromSnippet: addText)
+        guard !added.isEmpty else {
+            addError = "That doesn't look like a server entry — paste the JSON block from the server's README."
+            return
+        }
+        addText = ""
+        addError = nil
+        showAddForm = false
+        reload()
+        for name in added { check(name) }
+    }
+
+    private func remove(_ name: String) {
+        Task { @MainActor in
+            await MCPService.shared.disconnect(name: name)
+            MCPConfig.removeServer(named: name)
+            reload()
         }
     }
 
