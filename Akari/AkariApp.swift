@@ -878,6 +878,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         _ = await streamOneTurn(in: conversation, instr: pendingResult + "\n\n[Step limit reached — give your final answer now in plain text, no tools.]")
     }
 
+    /// Who Akari is — folded into EVERY turn (the memory pattern: this 4B only
+    /// reliably attends to what's near the end of the prompt, so "once in
+    /// history" fades in long chats — and a keyword gate would miss privacy
+    /// paraphrases, the one place a miss is expensive). ~60 tokens, invisible
+    /// to the user. Wording is the founder's; identity evals in EVALS.md.
+    static let akariIdentity = """
+    # Who you are
+    You are Akari, a private assistant living in this Mac's notch. You run entirely on this Mac: \
+    the AI is local, and screenshots, audio, and conversations never leave the machine or touch \
+    any cloud AI — say so plainly if asked about privacy. You can see the screen, point at and \
+    click things, work with files, calendar, reminders, mail drafts and apps, and run automations \
+    on schedules and triggers. You are Akari — not ChatGPT, not Claude, not any cloud service. \
+    Reply briefly and warmly in plain language, and never call yourself "just an AI".
+    """
+
     /// ONE model turn: See (image) or Ask (text). `instr` is extra context folded
     /// into the user prompt (a candidate list, a tool spec, or a tool result —
     /// never a system message, which segfaults the local chat template). Returns
@@ -893,7 +908,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let stream: AsyncThrowingStream<String, Error>
         if let image {
             let userText = conversation.messages.last(where: { $0.role == .user })?.text ?? ""
-            let prompt = [preamble, instr, memory, userText].filter { !$0.isEmpty }.joined(separator: "\n\n")
+            let prompt = [Self.akariIdentity, preamble, instr, memory, userText].filter { !$0.isEmpty }.joined(separator: "\n\n")
             agentLog.info("streamOneTurn: See. prompt=\"\(userText, privacy: .public)\"")
             stream = LocalEngine.shared.explain(image: image, prompt: prompt)
         } else {
@@ -901,7 +916,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 .filter { !$0.text.isEmpty }
                 .map { LocalEngine.ChatTurn(role: $0.role == .user ? .user : .assistant, text: $0.text) }
             guard !history.isEmpty else { return "" }
-            let fold = [preamble, instr, memory].filter { !$0.isEmpty }.joined(separator: "\n\n")
+            let fold = [Self.akariIdentity, preamble, instr, memory].filter { !$0.isEmpty }.joined(separator: "\n\n")
             if !fold.isEmpty, let last = history.indices.last {
                 history[last] = LocalEngine.ChatTurn(role: .user, text: fold + "\n\n" + history[last].text)
             }
@@ -1119,6 +1134,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 else if cmd == "__schedtest__" { self?.runSchedTest() }
                 else if cmd == "__trigtest__" { self?.runTrigTest() }
                 else if cmd == "__trigapptest__" { self?.runTrigAppTest() }
+                else if cmd == "__identityeval__" {
+                    // Identity block eval (EVALS.md): the questions Akari must
+                    // never fumble, cold and at depth. Judged on "mentions
+                    // Akari" + (privacy) a stays-local claim; full replies
+                    // logged for the founder's wording pass.
+                    guard let self else { return }
+                    let cases = ["who are you?", "who made you?",
+                                 "do you send my data to the cloud?",
+                                 "are you ChatGPT?", "what can you do?"]
+                    for q in cases {
+                        let convo = Conversation(chatWithApp: "")
+                        convo.addUserMessage(q)
+                        let reply = await self.streamOneTurn(in: convo, instr: "", display: false)
+                        let lower = reply.lowercased()
+                        let named = lower.contains("akari")
+                        let privacyOK = !q.contains("cloud") || lower.contains("local") || lower.contains("never leave") || lower.contains("on your mac") || lower.contains("on this mac")
+                        agentLog.info("identityeval [\(q, privacy: .public)] named=\(named) privacy=\(privacyOK) → \(reply.prefix(220), privacy: .public)")
+                    }
+                    // Depth: the same question after 8 unrelated exchanges.
+                    let deep = Conversation(chatWithApp: "")
+                    for i in 1...8 {
+                        deep.addUserMessage("random filler question number \(i) about cooking pasta")
+                        deep.commitAssistantMessage("Filler answer \(i): boil water, add salt, cook until al dente.")
+                    }
+                    deep.addUserMessage("who are you?")
+                    let deepReply = await self.streamOneTurn(in: deep, instr: "", display: false)
+                    agentLog.info("identityeval [DEPTH who are you?] named=\(deepReply.lowercased().contains("akari")) → \(deepReply.prefix(220), privacy: .public)")
+                    agentLog.info("identityeval DONE")
+                }
                 else if cmd == "__holdopttest__" {
                     // HOLD-⌥ GESTURE: drive the REAL HotkeyMonitor with synthetic
                     // CGEvents. ① hold 0.7s alone → mic begins on threshold, ends
@@ -2408,6 +2452,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         check("edit menu installed", editMenu != nil)
         check("edit menu paste wired", editMenu?.items.contains { $0.action == #selector(NSText.paste(_:)) } == true)
         check("edit menu selectall wired", editMenu?.items.contains { $0.action == #selector(NSText.selectAll(_:)) } == true)
+        // Identity block — the claims Akari must never fumble are present
+        check("identity names Akari", Self.akariIdentity.contains("You are Akari"))
+        check("identity privacy claim", Self.akariIdentity.contains("never leave"))
+        check("identity not-chatgpt", Self.akariIdentity.contains("not ChatGPT"))
         // MCP fill (v2 #1 increment ②) — schema condenser, fill prompt, eval matcher
         let fillSchema: [String: Any] = ["type": "object",
             "properties": ["path": ["type": "string", "description": "the file path"],
