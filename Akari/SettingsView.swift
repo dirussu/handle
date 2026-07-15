@@ -557,21 +557,28 @@ private struct ActivitySection: View {
                 }
             }
             HStack {
-                Button("Reveal log in Finder", action: revealLog)
+                Button("Open full log", action: openLog)
                     .buttonStyle(.akariSolid)
                 Spacer()
             }
         } header: {
             SettingsHeader(icon: "list.bullet.rectangle", title: "Activity")
         } footer: {
-            Text("Recorded locally to audit.jsonl — the 20 most recent shown here.")
+            Text("The last 5 actions — the full history is audit.jsonl, recorded locally.")
                 .font(.caption).foregroundStyle(.secondary)
         }
-        .task { entries = (await AuditLog.shared.recent(20)).reversed().compactMap(AuditEntry.init) }
+        .task { entries = (await AuditLog.shared.recent(5)).reversed().compactMap(AuditEntry.init) }
     }
 
-    private func revealLog() {
-        Task { NSWorkspace.shared.activateFileViewerSelecting([await AuditLog.shared.fileURL]) }
+    private func openLog() {
+        Task {
+            let url = await AuditLog.shared.fileURL
+            if FileManager.default.fileExists(atPath: url.path) {
+                NSWorkspace.shared.open(url)
+            } else {
+                NSSound.beep()
+            }
+        }
     }
 }
 
