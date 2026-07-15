@@ -14,13 +14,18 @@ struct AkariApp: App {
     var body: some Scene {
         // Akari has no conventional windows — its whole UI lives in the notch
         // (Settings and About are pages there). This empty scene only satisfies
-        // App's scene requirement for an accessory app.
+        // App's scene requirement for an accessory app. TextEditingCommands
+        // puts an Edit menu in the (invisible) menu bar — without one, ⌘V/⌘C/
+        // ⌘X/⌘A never reach ANY text field (SwiftUI's default accessory menu
+        // is App/View/Window/Help, no Edit; founder hit it pasting a connector).
         Settings { EmptyView() }
+            .commands { TextEditingCommands() }
     }
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var hotkeyMonitor: HotkeyMonitor?
+    private var editKeyMonitor: Any?
     private var isPresentingOverlay = false
 
     /// The most recently started conversation. Stays alive after the user
@@ -57,6 +62,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // frame. (The user-facing appearance picker was removed alongside this.)
         NSApp.appearance = NSAppearance(named: .darkAqua)
 
+        installEditMenu()
         setupHotkey()
         setupAccessibilityPriming()
         startScheduler()     // fire due saved automations (time triggers)
@@ -106,6 +112,49 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // every completion signal goes through Akari's own notification center — the
     // pill + result cards under the notch. One interface, no duplicate banners,
     // and no Notifications permission needed.
+
+    /// Accessory (LSUIElement) apps never show a menu bar — and SwiftUI's
+    /// default main menu for one has NO Edit menu (App/View/Window/Help), so
+    /// ⌘V/⌘C/⌘X/⌘A/⌘Z never reach any text field: typing works, pasting
+    /// silently doesn't (founder hit it in the connector paste box; the chat
+    /// input had the same latent bug). Two fixes, belt and braces:
+    /// 1. Insert an Edit menu AFTER SwiftUI installs its menu (it replaces
+    ///    whatever exists at launch — verified by menu dump).
+    /// 2. A local key monitor that routes the equivalents straight to the
+    ///    focused responder — menu routing can be bypassed while a
+    ///    nonactivating panel has key without the app being active.
+    private func installEditMenu() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            guard let main = NSApp.mainMenu,
+                  !main.items.contains(where: { $0.submenu?.title == "Edit" }) else { return }
+            let edit = NSMenu(title: "Edit")
+            edit.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
+            edit.addItem(withTitle: "Redo", action: Selector(("redo:")), keyEquivalent: "Z")
+            edit.addItem(.separator())
+            edit.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+            edit.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+            edit.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+            edit.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+            let editItem = NSMenuItem()
+            editItem.submenu = edit
+            main.insertItem(editItem, at: min(1, main.items.count))
+        }
+
+        editKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            guard event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command else { return event }
+            let action: Selector?
+            switch event.charactersIgnoringModifiers {
+            case "v": action = #selector(NSText.paste(_:))
+            case "c": action = #selector(NSText.copy(_:))
+            case "x": action = #selector(NSText.cut(_:))
+            case "a": action = #selector(NSText.selectAll(_:))
+            case "z": action = Selector(("undo:"))
+            default:  action = nil
+            }
+            guard let action, NSApp.sendAction(action, to: nil, from: nil) else { return event }
+            return nil   // handled — don't let it double-dispatch
+        }
+    }
 
     // MARK: - Hotkey
 
@@ -2353,6 +2402,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         MCPConfig.removeServer(named: "a", from: mcpTmp)
         check("mcp remove", ((try? Data(contentsOf: mcpTmp)).map(MCPConfig.parse) ?? []).map(\.name) == ["b"])
         try? FileManager.default.removeItem(at: mcpTmp)
+        // Edit menu (accessory apps route ⌘V through it — nothing else does)
+        agentLog.info("selftest menu dump: \(NSApp.mainMenu?.items.map { "\($0.title)/\($0.submenu?.title ?? "-")" }.joined(separator: ", ") ?? "NO MAIN MENU", privacy: .public)")
+        let editMenu = NSApp.mainMenu?.items.compactMap(\.submenu).first { $0.title == "Edit" }
+        check("edit menu installed", editMenu != nil)
+        check("edit menu paste wired", editMenu?.items.contains { $0.action == #selector(NSText.paste(_:)) } == true)
+        check("edit menu selectall wired", editMenu?.items.contains { $0.action == #selector(NSText.selectAll(_:)) } == true)
         // MCP fill (v2 #1 increment ②) — schema condenser, fill prompt, eval matcher
         let fillSchema: [String: Any] = ["type": "object",
             "properties": ["path": ["type": "string", "description": "the file path"],
