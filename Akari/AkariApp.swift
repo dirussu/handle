@@ -796,14 +796,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             agentLog.info("runToolLoop: step \(step) → tool=\(call.name, privacy: .public) args=\(String(describing: call.args), privacy: .public)")
 
-            // REPEAT GUARD — the 4B sometimes re-issues the IDENTICAL call instead
+            // REPEAT GUARD — the 4B sometimes re-issues the SAME call instead
             // of answering from its result (observed live: read_calendar_events ×5
             // straight to the step cap — five chips, one answer). Two identical
             // consecutive calls = not converging; stop burning steps, hand it the
             // result it already has, and force the final plain-text answer.
-            let argsSig = (try? JSONSerialization.data(withJSONObject: call.args, options: [.sortedKeys]))
-                .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
-            let signature = call.name + "|" + argsSig
+            let signature = Self.callSignature(name: call.name, args: call.args)
             if signature == lastCallSignature {
                 agentLog.info("runToolLoop: duplicate \(call.name, privacy: .public) with identical args — forcing final answer")
                 let resultContext = lastToolSummary.isEmpty ? "" : toolResultText(call.name, lastToolSummary, isError: false) + "\n\n"
@@ -1665,6 +1663,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         agentLog.info("mcpfilleval DONE: values \(values)/\(cases.count), strict \(strict)/\(cases.count)")
     }
 
+    /// Repeat-guard signature: tool name + NORMALIZED args. Byte-identical
+    /// comparison missed real repeats (founder repro, 2026-07-10: the 4B's
+    /// first call carried "+02: soul" — corrupted text inside the timezone
+    /// offset that the lenient date parser still accepted — so the clean
+    /// second call didn't match and ran again → two chips). Any value that
+    /// parses as a date collapses to its wall-clock MINUTE; everything else
+    /// lowercases and trims, so same-intent re-calls match regardless of the
+    /// model's textual jitter.
+    static func callSignature(name: String, args: [String: Any]) -> String {
+        let parts = args.keys.sorted().map { key -> String in
+            let raw = String(describing: args[key] ?? "")
+            if let date = CalendarTools.parseDate(raw) {
+                return "\(key)=@\(Int(date.timeIntervalSince1970 / 60))"
+            }
+            return "\(key)=\(raw.lowercased().trimmingCharacters(in: .whitespacesAndNewlines))"
+        }
+        return name + "|" + parts.joined(separator: "&")
+    }
+
     /// First integer (incl. negative) in a string.
     private func firstInt(in s: String) -> Int? {
         guard let r = s.range(of: "-?\\d+", options: .regularExpression) else { return nil }
@@ -2475,6 +2492,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         check("emoji keeps digits", Conversation.withoutEmoji("call 911 at 9:30") == "call 911 at 9:30")
         check("emoji keeps arrows", Conversation.withoutEmoji("A → B") == "A → B")
         check("emoji passthrough", Conversation.withoutEmoji("plain text") == "plain text")
+        // Repeat-guard signature — textual jitter in dates must not defeat it
+        check("sig identical args", Self.callSignature(name: "t", args: ["a": "X"]) == Self.callSignature(name: "t", args: ["a": "X"]))
+        check("sig date forms match", Self.callSignature(name: "t", args: ["start_iso": "2026-07-15T00:00:00+02:00"]) == Self.callSignature(name: "t", args: ["start_iso": "2026-07-15T00:00"]))
+        check("sig different dates differ", Self.callSignature(name: "t", args: ["start_iso": "2026-07-15T00:00"]) != Self.callSignature(name: "t", args: ["start_iso": "2026-07-16T00:00"]))
+        check("sig case/space normalized", Self.callSignature(name: "t", args: ["q": " Mary "]) == Self.callSignature(name: "t", args: ["q": "mary"]))
+        check("sig name matters", Self.callSignature(name: "a", args: [:]) != Self.callSignature(name: "b", args: [:]))
+        check("sig key order stable", Self.callSignature(name: "t", args: ["a": "1", "b": "2"]) == Self.callSignature(name: "t", args: ["b": "2", "a": "1"]))
+        // The exact live repro: the 4B corrupted the offset ("+02: soul"), the lenient
+        // parser accepted it, and the clean re-call slipped past the byte guard.
+        check("sig corrupt offset matches clean", Self.callSignature(name: "t", args: ["s": "2026-07-15T00:00:00+02: soul"]) == Self.callSignature(name: "t", args: ["s": "2026-07-15T00:00:00+02:00"]))
         // MCP fill (v2 #1 increment ②) — schema condenser, fill prompt, eval matcher
         let fillSchema: [String: Any] = ["type": "object",
             "properties": ["path": ["type": "string", "description": "the file path"],
