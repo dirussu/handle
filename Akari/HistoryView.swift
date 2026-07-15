@@ -96,12 +96,16 @@ struct HistoryBody: View {
                         confirmClear = true
                     }
                 } label: {
-                    Text(confirmClear ? "Really clear all? Click again" : "Clear All")
-                        .font(.akariCaption)
-                        .foregroundStyle(confirmClear ? .red : .white.opacity(0.5))
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 5)
-                        .contentShape(Rectangle())
+                    HStack(spacing: 5) {
+                        Image(systemName: "trash")
+                            .font(.system(size: 10))
+                        Text(confirmClear ? "Really clear all? Click again" : "Clear All")
+                            .font(.akariCaption)
+                    }
+                    .foregroundStyle(confirmClear ? .red : .white.opacity(0.5))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .animation(AkariMotion.feedback, value: confirmClear)
