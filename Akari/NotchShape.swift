@@ -112,6 +112,13 @@ struct BorderComet<S: Shape>: View {
     var glow: Double = 0.75           // glow intensity (the tight shadow's opacity)
 
     private let segments = 52
+    /// The comet rides the shape's BORDER, so half its stroke and all of its
+    /// outer glow live OUTSIDE the given bounds — and a Canvas clips to its
+    /// bounds, which swallowed the outer bloom around curves (founder
+    /// screenshot, 2026-07-10: "hides behind something"). The canvas extends
+    /// past the slot by this much; the path is drawn inset back to the
+    /// original geometry, so the border lands exactly where it always did.
+    private let overscan: CGFloat = 12
 
     var body: some View {
         TimelineView(.animation) { timeline in
@@ -125,7 +132,9 @@ struct BorderComet<S: Shape>: View {
             // frame at 120fps and saturated the main thread, starving the inference
             // stream (the "app doesn't respond" hang). Visual is identical.
             Canvas { ctx, size in
-                let path = shape.path(in: CGRect(origin: .zero, size: size))
+                let path = shape.path(in: CGRect(x: overscan, y: overscan,
+                                                 width: size.width - overscan * 2,
+                                                 height: size.height - overscan * 2))
                 // Gradient tail — overlapping thin segments, fading fast. Each
                 // overlaps ~6 steps into its neighbour so the line stays even
                 // around corners. Fade AND width taper together (founder polish,
@@ -143,6 +152,7 @@ struct BorderComet<S: Shape>: View {
                 strokeComet(ctx, path, m.head - 0.008, m.head + 0.008, color: .white.opacity(0.9), width: lineWidth)
                 strokeComet(ctx, path, m.head - 0.004, m.head + 0.004, color: .white, width: lineWidth * 1.25)
             }
+            .padding(-overscan)   // grow the canvas past the slot; the inset above restores the geometry
             // Soft glow via shadow — blooms symmetrically on both sides.
             .shadow(color: .white.opacity(glow), radius: 3)
             .shadow(color: .white.opacity(glow * 0.6), radius: 7)
