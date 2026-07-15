@@ -111,7 +111,10 @@ struct BorderComet<S: Shape>: View {
     var lineWidth: CGFloat = 1.2      // head thickness (tail scales from this)
     var glow: Double = 0.75           // glow intensity (the tight shadow's opacity)
 
-    private let segments = 52
+    private let segments = 72   // fine enough that per-segment width/opacity steps
+                                // vanish (52 scalloped on curves — founder; the fix
+                                // is mostly the BUTT caps, so 96 wasn't needed and
+                                // its draw cost competed with inference)
     /// The comet rides the shape's BORDER, so half its stroke and all of its
     /// outer glow live OUTSIDE the given bounds — and a Canvas clips to its
     /// bounds, which swallowed the outer bloom around curves (founder
@@ -135,22 +138,22 @@ struct BorderComet<S: Shape>: View {
                 let path = shape.path(in: CGRect(x: overscan, y: overscan,
                                                  width: size.width - overscan * 2,
                                                  height: size.height - overscan * 2))
-                // Gradient tail — overlapping thin segments, fading fast. Each
-                // overlaps ~6 steps into its neighbour so the line stays even
-                // around corners. Fade AND width taper together (founder polish,
-                // 2026-07-10): opacity-only fading kept a constant-width stroke
-                // that ended blunt — a real comet thins to nothing at the tip.
+                // Gradient tail — fine BUTT-capped ribbon segments with a small
+                // overlap. Round caps at 52-segment pitch scalloped on curves
+                // (founder screenshot): neighbouring caps splay at slightly
+                // different widths. Butt caps + 96 segments + 2-step overlap
+                // tile into one continuous tapered ribbon. Fade AND width taper
+                // together — a real comet thins to nothing at the tip.
                 for i in stride(from: segments - 1, through: 0, by: -1) {
                     let f = CGFloat(i)
                     let t = 1 - f / CGFloat(segments)          // 0 at the tip → 1 at the head
                     let fade = pow(Double(t), 2.6)
                     let width = lineWidth * (0.2 + 0.8 * t)    // hairline tip → FULL width at the head
-                    strokeComet(ctx, path, m.head - m.dir * (f + 6) * step, m.head - m.dir * f * step,
-                                color: .white.opacity(fade * 0.7), width: width)
+                    strokeComet(ctx, path, m.head - m.dir * (f + 2) * step, m.head - m.dir * f * step,
+                                color: .white.opacity(fade * 0.7), width: width, cap: .butt)
                 }
-                // Bright head at the SAME width the tail ramps into — a wider "hot
-                // core" here made a visible step at the nose (founder screenshot);
-                // the glow shadows below carry the head emphasis instead.
+                // Bright head at the SAME width the tail ramps into — round cap
+                // for the clean nose; the glow shadows carry the head emphasis.
                 strokeComet(ctx, path, m.head - 0.006, m.head + 0.006, color: .white, width: lineWidth)
             }
             .padding(-overscan)   // grow the canvas past the slot; the inset above restores the geometry
@@ -180,10 +183,10 @@ struct BorderComet<S: Shape>: View {
     /// Stroke the comet's [from,to] span into the Canvas (one range, or two when an
     /// orbit wraps the 0/1 seam).
     private func strokeComet(_ ctx: GraphicsContext, _ path: Path, _ from: CGFloat, _ to: CGFloat,
-                             color: Color, width: CGFloat) {
+                             color: Color, width: CGFloat, cap: CGLineCap = .round) {
         for r in ranges(from, to) {
             ctx.stroke(path.trimmedPath(from: r.0, to: r.1),
-                       with: .color(color), style: StrokeStyle(lineWidth: width, lineCap: .round))
+                       with: .color(color), style: StrokeStyle(lineWidth: width, lineCap: cap))
         }
     }
 
