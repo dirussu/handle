@@ -275,12 +275,22 @@ private struct PermissionsSection: View {
             Item(id: "mic", icon: "mic", name: "Microphone (voice)",
                  status: PermissionsService.microphone(), pane: "Privacy_Microphone",
                  request: { PermissionsService.requestMicrophone() }),
-            Item(id: "loc", icon: "location", name: "Location (Wi-Fi triggers)",
-                 status: PermissionsService.location(), pane: "Privacy_LocationServices",
-                 request: { PermissionsService.requestLocation() }),
             // (No Notifications row — system notifications removed; the notch pill
             // is Akari's only completion surface and needs no permission.)
         ]
+        // Location exists ONLY because macOS gates Wi-Fi SSID reads behind it
+        // (named-network triggers). A permanent "Location" row in a privacy-
+        // first app reads wrong (founder, 2026-07-10) — show it only once a
+        // named-Wi-Fi automation exists, or after the user already decided
+        // (granted/denied must never become invisible).
+        let locationStatus = PermissionsService.location()
+        let hasNamedWifiTrigger = AutomationStore.shared.automations
+            .contains { $0.trigger?.kind == "wifiConnects" && $0.trigger?.ssid != nil }
+        if hasNamedWifiTrigger || locationStatus == .granted || locationStatus == .denied {
+            out.append(Item(id: "loc", icon: "location", name: "Location (Wi-Fi triggers)",
+                            status: locationStatus, pane: "Privacy_LocationServices",
+                            request: { PermissionsService.requestLocation() }))
+        }
         // Per-app Automation consent for the apps saved automations actually control.
         var targets: [String] = []
         for a in AutomationStore.shared.automations {
