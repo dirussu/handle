@@ -203,8 +203,7 @@ struct NotchRootView: View {
         .overlay {
             if vm.phase == .closed && vm.isWorking {
                 BorderComet(shape: NotchBottomOutline(topCornerRadius: topRadius, bottomCornerRadius: bottomRadius),
-                            loops: false, period: 5.2, tailLength: 0.30, lineWidth: 2.0, glow: 0.9,
-                            inset: 2.5)   // ride INSIDE the pill's black — contrast on any wallpaper, no dark decoration
+                            loops: false, period: 5.2, tailLength: 0.30, lineWidth: 2.0, glow: 0.9)
             }
         }
         .contentShape(shape)

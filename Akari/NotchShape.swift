@@ -110,13 +110,6 @@ struct BorderComet<S: Shape>: View {
     var tailLength: CGFloat = 0.18    // fraction of the path the tail spans
     var lineWidth: CGFloat = 1.2      // head thickness (tail scales from this)
     var glow: Double = 0.75           // glow intensity (the tight shadow's opacity)
-    var inset: CGFloat = 0            // ride the path this far INSIDE the shape.
-                                      // The closed pill uses it: on the exact edge,
-                                      // half the line + glow sat over the wallpaper
-                                      // and vanished on light backgrounds — every
-                                      // dark-backing fix (shadow/casing/blur) read
-                                      // as dirt (founder, ×3). Inset, the line sits
-                                      // on the pill's own black. Contrast for free.
 
     private let segments = 52
     /// The comet rides the shape's BORDER, so half its stroke and all of its
@@ -139,9 +132,9 @@ struct BorderComet<S: Shape>: View {
             // frame at 120fps and saturated the main thread, starving the inference
             // stream (the "app doesn't respond" hang). Visual is identical.
             Canvas { ctx, size in
-                let path = shape.path(in: CGRect(x: overscan + inset, y: overscan + inset,
-                                                 width: size.width - (overscan + inset) * 2,
-                                                 height: size.height - (overscan + inset) * 2))
+                let path = shape.path(in: CGRect(x: overscan, y: overscan,
+                                                 width: size.width - overscan * 2,
+                                                 height: size.height - overscan * 2))
                 // Gradient tail — overlapping thin segments, fading fast. Each
                 // overlaps ~6 steps into its neighbour so the line stays even
                 // around corners. Fade AND width taper together (founder polish,
