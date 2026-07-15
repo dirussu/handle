@@ -110,6 +110,9 @@ struct BorderComet<S: Shape>: View {
     var tailLength: CGFloat = 0.18    // fraction of the path the tail spans
     var lineWidth: CGFloat = 1.2      // head thickness (tail scales from this)
     var glow: Double = 0.75           // glow intensity (the tight shadow's opacity)
+    var darkHalo: Double = 0          // dark backing shadow (0 = none) — the closed
+                                      // notch rides the menu bar, and on a light
+                                      // background a white comet vanishes without it
 
     private let segments = 52
     /// The comet rides the shape's BORDER, so half its stroke and all of its
@@ -157,6 +160,9 @@ struct BorderComet<S: Shape>: View {
             // Soft glow via shadow — blooms symmetrically on both sides.
             .shadow(color: .white.opacity(glow), radius: 3)
             .shadow(color: .white.opacity(glow * 0.6), radius: 7)
+            // Dark halo LAST so it wraps the line and its white bloom together —
+            // the contrast rim that keeps the comet visible on light backgrounds.
+            .shadow(color: .black.opacity(darkHalo), radius: 4)
         }
         .allowsHitTesting(false)
     }
