@@ -882,15 +882,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// paraphrases, the one place a miss is expensive). ~60 tokens, invisible
     /// to the user. Wording is the founder's; identity evals in EVALS.md.
     static let akariIdentity = """
-    # Who you are
-    You are Akari, a private assistant living in this Mac's notch. You run entirely on this Mac: \
-    the AI is local, and screenshots, audio, and conversations never leave the machine or touch \
-    any cloud AI — say so plainly if asked about privacy. You can see the screen, point at and \
-    click things, work with files, calendar, reminders, mail drafts and apps, and run automations \
-    on schedules and triggers. You are Akari — not ChatGPT, not Claude, not any cloud service. \
-    Reply briefly and warmly in plain language, and never call yourself "just an AI". \
-    Do not use emoji. Don't introduce yourself or bring up privacy unless the user asks \
-    who you are or how their data is handled — in casual chat, just answer.
+    [Background for you (not part of the user's message): you are Akari, a private assistant \
+    in this Mac's notch. Everything runs locally — screenshots, audio, and conversations never \
+    leave this machine or touch any cloud AI. You can see the screen, click things, work with \
+    files, calendar, reminders and apps, and run automations. Not ChatGPT, not Claude.
+    Respond to the user's message naturally, briefly, in plain language. No emoji. How to respond:
+    - a greeting like "hi" → greet back in a few words, e.g. "Hey — what can I do for you?" No introduction.
+    - "how are you" → answer like a person, e.g. "Doing great — ready when you are." No introduction.
+    - a question or task → just answer or do it.
+    - ONLY when asked who you are, who made you, or whether data is safe → say you're Akari and everything stays on this Mac.]
     """
 
     /// ONE model turn: See (image) or Ask (text). `instr` is extra context folded
@@ -1135,14 +1135,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 else if cmd == "__trigtest__" { self?.runTrigTest() }
                 else if cmd == "__trigapptest__" { self?.runTrigAppTest() }
                 else if cmd.hasPrefix("__chatprobe__ ") {
-                    // One plain text turn straight through streamOneTurn — for
-                    // tone/wording checks without driving the GUI.
+                    // Plain text turns straight through streamOneTurn — for tone/
+                    // wording checks without driving the GUI. " || " separates
+                    // successive turns of ONE conversation (multi-turn repros).
                     guard let self else { return }
                     let convo = Conversation(chatWithApp: "")
-                    convo.addUserMessage(String(cmd.dropFirst("__chatprobe__ ".count)))
-                    let reply = await self.streamOneTurn(in: convo, instr: "", display: false)
-                    // Log the DISPLAYED form — commit-time filtering (emoji strip) applied.
-                    agentLog.info("chatprobe → \(Conversation.withoutEmoji(reply).prefix(300), privacy: .public)")
+                    for turn in String(cmd.dropFirst("__chatprobe__ ".count)).components(separatedBy: " || ") {
+                        convo.addUserMessage(turn)
+                        let reply = await self.streamOneTurn(in: convo, instr: "", display: false)
+                        let shown = Conversation.withoutEmoji(reply)
+                        convo.commitAssistantMessage(shown)
+                        // Log the DISPLAYED form — commit-time filtering applied.
+                        agentLog.info("chatprobe [\(turn.prefix(40), privacy: .public)] → \(shown.prefix(300), privacy: .public)")
+                    }
                 }
                 else if cmd == "__identityeval__" {
                     // Identity block eval (EVALS.md): the questions Akari must
@@ -2482,9 +2487,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         check("edit menu paste wired", editMenu?.items.contains { $0.action == #selector(NSText.paste(_:)) } == true)
         check("edit menu selectall wired", editMenu?.items.contains { $0.action == #selector(NSText.selectAll(_:)) } == true)
         // Identity block — the claims Akari must never fumble are present
-        check("identity names Akari", Self.akariIdentity.contains("You are Akari"))
+        check("identity names Akari", Self.akariIdentity.contains("you are Akari"))
         check("identity privacy claim", Self.akariIdentity.contains("never leave"))
-        check("identity not-chatgpt", Self.akariIdentity.contains("not ChatGPT"))
+        check("identity not-chatgpt", Self.akariIdentity.contains("Not ChatGPT"))
+        check("identity greeting example", Self.akariIdentity.contains("what can I do for you"))
         // Emoji strip — displayed chat text only; text-presentation glyphs survive
         check("emoji strip smiley", Conversation.withoutEmoji("Good morning! 🌞") == "Good morning!")
         check("emoji strip mid-text", Conversation.withoutEmoji("welcome 🫶 back") == "welcome back")
