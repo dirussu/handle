@@ -144,13 +144,14 @@ struct BorderComet<S: Shape>: View {
                     let f = CGFloat(i)
                     let t = 1 - f / CGFloat(segments)          // 0 at the tip → 1 at the head
                     let fade = pow(Double(t), 2.6)
-                    let width = lineWidth * (0.2 + 0.65 * t)   // tip a hairline, head-adjacent ~0.85×
+                    let width = lineWidth * (0.2 + 0.8 * t)    // hairline tip → FULL width at the head
                     strokeComet(ctx, path, m.head - m.dir * (f + 6) * step, m.head - m.dir * f * step,
                                 color: .white.opacity(fade * 0.7), width: width)
                 }
-                // Bright head with a hotter core — the comet's focal point.
-                strokeComet(ctx, path, m.head - 0.008, m.head + 0.008, color: .white.opacity(0.9), width: lineWidth)
-                strokeComet(ctx, path, m.head - 0.004, m.head + 0.004, color: .white, width: lineWidth * 1.25)
+                // Bright head at the SAME width the tail ramps into — a wider "hot
+                // core" here made a visible step at the nose (founder screenshot);
+                // the glow shadows below carry the head emphasis instead.
+                strokeComet(ctx, path, m.head - 0.006, m.head + 0.006, color: .white, width: lineWidth)
             }
             .padding(-overscan)   // grow the canvas past the slot; the inset above restores the geometry
             // Soft glow via shadow — blooms symmetrically on both sides.
