@@ -138,6 +138,23 @@ struct BorderComet<S: Shape>: View {
                 let path = shape.path(in: CGRect(x: overscan, y: overscan,
                                                  width: size.width - overscan * 2,
                                                  height: size.height - overscan * 2))
+                // Dark CASING first (the map-roads trick): when the comet must
+                // survive a light background (darkHalo > 0), a black under-stroke
+                // ~2.2× the comet's width goes down before the white — a crisp
+                // contrast rim where a blurred shadow was too diffuse to read
+                // (founder, 2026-07-10). Drawn as a full pass so no white segment
+                // ever sits under a neighbour's casing.
+                if darkHalo > 0 {
+                    for i in stride(from: segments - 1, through: 0, by: -1) {
+                        let f = CGFloat(i)
+                        let t = 1 - f / CGFloat(segments)
+                        let fade = pow(Double(t), 2.6)
+                        strokeComet(ctx, path, m.head - m.dir * (f + 6) * step, m.head - m.dir * f * step,
+                                    color: .black.opacity(fade * darkHalo), width: lineWidth * (0.2 + 0.8 * t) * 2.2)
+                    }
+                    strokeComet(ctx, path, m.head - 0.006, m.head + 0.006,
+                                color: .black.opacity(darkHalo), width: lineWidth * 2.2)
+                }
                 // Gradient tail — overlapping thin segments, fading fast. Each
                 // overlaps ~6 steps into its neighbour so the line stays even
                 // around corners. Fade AND width taper together (founder polish,
@@ -160,9 +177,6 @@ struct BorderComet<S: Shape>: View {
             // Soft glow via shadow — blooms symmetrically on both sides.
             .shadow(color: .white.opacity(glow), radius: 3)
             .shadow(color: .white.opacity(glow * 0.6), radius: 7)
-            // Dark halo LAST so it wraps the line and its white bloom together —
-            // the contrast rim that keeps the comet visible on light backgrounds.
-            .shadow(color: .black.opacity(darkHalo), radius: 4)
         }
         .allowsHitTesting(false)
     }
