@@ -1,5 +1,19 @@
 import SwiftUI
 
+// MARK: - Focus rings: none, app-wide
+//
+// SwiftUI's TextField bridges to NSTextField, whose macOS focus ring draws a
+// thick gray halo that reads as damage on Akari's black surface (founder
+// screenshot, 2026-07-10) — and `.focusEffectDisabled()` doesn't reach the
+// bridged AppKit ring. One override kills it everywhere; focus itself (cursor,
+// keyboard navigation) is untouched.
+extension NSTextField {
+    open override var focusRingType: NSFocusRingType {
+        get { .none }
+        set {}
+    }
+}
+
 // MARK: - Type system
 //
 // Strict three-role ramp: title / body / caption. Everything else is a
