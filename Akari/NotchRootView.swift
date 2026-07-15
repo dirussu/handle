@@ -534,11 +534,11 @@ private struct NotificationCenterView: View {
                     Button(action: onDismissAll) {
                         Image(systemName: "xmark")
                             .font(.system(size: 11, weight: .bold))
-                            .foregroundStyle(.white.opacity(0.9))
                             .frame(width: 20, height: 20)
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    .akariIconHover(idle: .white.opacity(0.9))
                     .help("Clear all notifications")
                     .transition(.scale(scale: 0.6).combined(with: .opacity))
                 } else {
@@ -570,13 +570,13 @@ private struct NotificationCenterView: View {
         Button { withAnimation(reduce ? .easeOut(duration: 0.2) : AkariMotion.pop) { expanded = false } } label: {
             Image(systemName: "chevron.up")
                 .font(.system(size: 11, weight: .bold))
-                .foregroundStyle(.white.opacity(0.7))
                 .frame(width: 46, height: 22)
                 .background(Color.black, in: Capsule())
                 .overlay { Capsule().strokeBorder(Color.white.opacity(0.12), lineWidth: 1) }
                 .contentShape(Capsule())
         }
         .buttonStyle(.plain)
+        .akariIconHover(idle: .white.opacity(0.7))
     }
 }
 

@@ -390,6 +390,7 @@ private struct AutomationEditor: View {
             HStack {
                 Button("Save", action: save).buttonStyle(.akariSolid)
                 Button("Cancel", action: onCancel).buttonStyle(.borderless)
+                    .akariIconHover(idle: Color(nsColor: .secondaryLabelColor))
                 Spacer()
             }
         }
@@ -887,6 +888,7 @@ private struct IntegrationsSection: View {
                             .disabled(addText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                         Button("Cancel") { showAddForm = false; addText = ""; addError = nil }
                             .buttonStyle(.borderless)
+                            .akariIconHover(idle: Color(nsColor: .secondaryLabelColor))
                         Spacer()
                     }
                 }

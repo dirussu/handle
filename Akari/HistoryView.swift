@@ -10,6 +10,7 @@ struct HistoryBody: View {
     @State private var rows: [ConversationSummary] = []
     @State private var loaded = false
     @State private var confirmClear = false
+    @State private var clearHover = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: AkariSpacing.s) {
@@ -102,13 +103,16 @@ struct HistoryBody: View {
                         Text(confirmClear ? "Really clear all? Click again" : "Clear All")
                             .font(.akariCaption)
                     }
-                    .foregroundStyle(confirmClear ? .red : .white.opacity(0.5))
+                    // Armed red wins; otherwise the house hover (dim → white).
+                    .foregroundStyle(confirmClear ? .red : (clearHover ? .white : .white.opacity(0.5)))
                     .padding(.horizontal, 8)
                     .padding(.vertical, 5)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .onHover { clearHover = $0 }
                 .animation(AkariMotion.feedback, value: confirmClear)
+                .animation(AkariMotion.feedback, value: clearHover)
             }
         }
     }
