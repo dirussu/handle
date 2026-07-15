@@ -1070,6 +1070,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 else if cmd == "__schedtest__" { self?.runSchedTest() }
                 else if cmd == "__trigtest__" { self?.runTrigTest() }
                 else if cmd == "__trigapptest__" { self?.runTrigAppTest() }
+                else if cmd == "__createautotest__" {
+                    // Settings "New automation…" pipeline: an action goal must
+                    // save as a RECIPE automation (matched + filled), an
+                    // info/summarize goal as a ROUTINE. Cleaned up after.
+                    guard let self else { return }
+                    let sched = AutomationSchedule(hour: 8, minute: 0, days: nil)
+                    let a = await self.createAutomationFromSettings(goal: "set the volume to 20", schedule: sched)
+                    agentLog.info("createautotest: action goal → \(a?.recipeId ?? "-", privacy: .public) params=\(a?.paramsJSON ?? "-", privacy: .public) routine=\(a?.routineGoal ?? "nil", privacy: .public) (want set-volume / level 20 / nil)")
+                    let b = await self.createAutomationFromSettings(goal: "summarize my calendar for the day", schedule: sched)
+                    agentLog.info("createautotest: agentic goal → recipe=\(b?.recipeId.isEmpty == false ? b!.recipeId : "(none)", privacy: .public) routine=\(b?.routineGoal ?? "nil", privacy: .public) (want (none) / the goal)")
+                    for id in [a?.id, b?.id].compactMap({ $0 }) { AutomationStore.shared.remove(id: id) }
+                    agentLog.info("createautotest: DONE (cleaned up)")
+                }
                 else if cmd == "__holdopttest__" {
                     // HOLD-⌥ GESTURE: drive the REAL HotkeyMonitor with synthetic
                     // CGEvents. ① hold 0.7s alone → mic begins on threshold, ends
@@ -1742,6 +1755,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         conversation.commitAssistantMessage(msg)
         return true
+    }
+
+    /// Settings → Automations "New automation…" (founder ask, 2026-07-10):
+    /// the SAME pipeline as a chat request — recipe match → model param fill;
+    /// no recipe → an agentic routine — but the schedule comes from the form
+    /// and the form itself is the standing consent (no card). Returns the
+    /// saved automation; nil only for an empty goal (the form disables Save).
+    func createAutomationFromSettings(goal: String, schedule: AutomationSchedule) async -> Automation? {
+        let goal = goal.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !goal.isEmpty else { return nil }
+        let automation: Automation
+        if let recipe = await matchRecipe(goal: goal) {
+            let params = await fillParams(recipe: recipe, goal: goal)
+            let paramsJSON = (try? JSONSerialization.data(withJSONObject: params))
+                .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+            automation = Automation(id: UUID().uuidString, name: recipe.title, recipeId: recipe.id,
+                                    paramsJSON: paramsJSON, schedule: schedule)
+            // Stage TCC now, while the user is present (same as the chat save path).
+            _ = PermissionsService.primeAutomationTargets(inScript: recipe.resolve(recipe.body, with: params))
+        } else {
+            automation = Automation(id: UUID().uuidString, name: Automation.routineName(goal),
+                                    recipeId: "", paramsJSON: "{}", schedule: schedule,
+                                    routineGoal: goal)
+        }
+        AutomationStore.shared.add(automation)
+        agentLog.info("automation created from Settings: \(automation.name, privacy: .public) (\(automation.routineGoal == nil ? "recipe" : "routine", privacy: .public))")
+        return automation
     }
 
     /// ROUTINE SAVE — the standing-consent card for an agentic scheduled task,

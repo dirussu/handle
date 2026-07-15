@@ -120,6 +120,12 @@ struct SettingsBody: View {
 private struct AutomationsSection: View {
     @State private var automations: [Automation] = AutomationStore.shared.automations
     @State private var editingID: String?
+    @State private var creating = false
+    @State private var newGoal = ""
+    @State private var newTimeText = "08:00"
+    @State private var newDays: Set<Int> = Set(1...7)
+    @State private var matching = false
+    @State private var createError: String?
 
     var body: some View {
         Section {
@@ -127,7 +133,7 @@ private struct AutomationsSection: View {
                 SettingsEmptyState(
                     icon: "clock.arrow.circlepath",
                     title: "No automations yet",
-                    hint: "Ask Akari for one — e.g. \u{201C}every day at 6pm, set my volume to 20\u{201D}.")
+                    hint: "Ask Akari for one in chat — or create one below.")
             } else {
                 ForEach(automations) { a in
                     HStack(spacing: 8) {
@@ -166,6 +172,42 @@ private struct AutomationsSection: View {
                     }
                 }
             }
+            if creating {
+                VStack(alignment: .leading, spacing: 8) {
+                    TextField("What should Akari do? e.g. summarize my calendar", text: $newGoal)
+                        .textFieldStyle(.roundedBorder)
+                        .disabled(matching)
+                    HStack(spacing: 8) {
+                        Text("At").font(.caption).foregroundStyle(.secondary)
+                        TextField("18:30", text: $newTimeText)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 64)
+                            .disabled(matching)
+                        WeekdayPicker(days: $newDays)
+                    }
+                    if let createError {
+                        Text(createError).font(.caption).foregroundStyle(.red)
+                    }
+                    HStack(spacing: 8) {
+                        Button("Save", action: create).buttonStyle(.akariSolid)
+                            .disabled(matching || newGoal.trimmingCharacters(in: .whitespaces).isEmpty)
+                        Button("Cancel") { creating = false; createError = nil }.buttonStyle(.borderless)
+                            .disabled(matching)
+                        if matching {
+                            ProgressView().controlSize(.small)
+                            Text("Working out how…").font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                    }
+                }
+                .padding(.vertical, 4)
+            } else {
+                HStack {
+                    Button("New automation…") { creating = true }
+                        .buttonStyle(.akariSolid)
+                    Spacer()
+                }
+            }
         } header: {
             SettingsHeader(icon: "clock.arrow.circlepath", title: "Automations")
         } footer: {
@@ -173,6 +215,32 @@ private struct AutomationsSection: View {
                 .font(.caption).foregroundStyle(.secondary)
         }
         .onAppear { automations = AutomationStore.shared.automations }
+    }
+
+    /// Save the creator form: parse the schedule locally, then hand the goal to
+    /// the SAME model pipeline chat uses (recipe match → fill; no recipe →
+    /// routine). The model may be cold — the form shows progress and stays up
+    /// on failure with the reason.
+    private func create() {
+        guard let (h, m) = AutomationSchedule.parseTime(newTimeText) else {
+            createError = "Time must be HH:MM (24-hour), e.g. 18:30."; return
+        }
+        guard !newDays.isEmpty else { createError = "Pick at least one day."; return }
+        guard let delegate = NSApp.delegate as? AppDelegate else { return }
+        let schedule = AutomationSchedule(hour: h, minute: m,
+                                          days: newDays.count == 7 ? nil : newDays.sorted())
+        matching = true
+        createError = nil
+        Task { @MainActor in
+            defer { matching = false }
+            if await delegate.createAutomationFromSettings(goal: newGoal, schedule: schedule) != nil {
+                automations = AutomationStore.shared.automations
+                creating = false
+                newGoal = ""
+            } else {
+                createError = "Describe what Akari should do."
+            }
+        }
     }
 
     private func enabledBinding(_ a: Automation) -> Binding<Bool> {
@@ -379,25 +447,7 @@ private struct AutomationEditor: View {
         .padding(.vertical, 4)
     }
 
-    /// S M T W T F S toggle chips (1=Sun … 7=Sat, matching AutomationSchedule).
-    private var dayPicker: some View {
-        HStack(spacing: 3) {
-            ForEach(1...7, id: \.self) { d in
-                let label = ["", "S", "M", "T", "W", "T", "F", "S"][d]
-                Button {
-                    if days.contains(d) { days.remove(d) } else { days.insert(d) }
-                } label: {
-                    Text(label)
-                        .font(.system(size: 10, weight: .semibold))
-                        .frame(width: 18, height: 18)
-                        .background(days.contains(d) ? Color.accentColor.opacity(0.8) : Color.secondary.opacity(0.15),
-                                    in: Circle())
-                        .foregroundStyle(days.contains(d) ? Color.white : Color.secondary)
-                }
-                .buttonStyle(.plain)
-            }
-        }
-    }
+    private var dayPicker: some View { WeekdayPicker(days: $days) }
 
     private func save() {
         var updated = original
@@ -747,6 +797,30 @@ private struct WorkspaceSection: View {
             NSWorkspace.shared.activateFileViewerSelecting([url])
         } catch {
             NSSound.beep()
+        }
+    }
+}
+
+/// S M T W T F S toggle chips (1=Sun … 7=Sat, matching AutomationSchedule).
+/// Shared by the automation editor and the Settings creator form.
+private struct WeekdayPicker: View {
+    @Binding var days: Set<Int>
+    var body: some View {
+        HStack(spacing: 3) {
+            ForEach(1...7, id: \.self) { d in
+                let label = ["", "S", "M", "T", "W", "T", "F", "S"][d]
+                Button {
+                    if days.contains(d) { days.remove(d) } else { days.insert(d) }
+                } label: {
+                    Text(label)
+                        .font(.system(size: 10, weight: .semibold))
+                        .frame(width: 18, height: 18)
+                        .background(days.contains(d) ? Color.accentColor.opacity(0.8) : Color.secondary.opacity(0.15),
+                                    in: Circle())
+                        .foregroundStyle(days.contains(d) ? Color.white : Color.secondary)
+                }
+                .buttonStyle(.plain)
+            }
         }
     }
 }
