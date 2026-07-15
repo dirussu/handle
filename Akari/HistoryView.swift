@@ -20,10 +20,8 @@ struct HistoryBody: View {
                     VStack(alignment: .leading, spacing: AkariSpacing.l) {
                         ForEach(groups, id: \.label) { group in
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(group.label)
+                                Text(group.label)   // "Yesterday" as written — no caps treatment (founder call); tracking went with it, wide-tracked lowercase reads as a mistake
                                     .font(.akariMicro)
-                                    .textCase(.uppercase)
-                                    .tracking(1.2)
                                     .foregroundStyle(.white.opacity(0.4))
                                     .padding(.horizontal, 8)
                                     .padding(.bottom, 2)
