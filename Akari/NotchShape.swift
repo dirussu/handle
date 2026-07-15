@@ -128,15 +128,20 @@ struct BorderComet<S: Shape>: View {
                 let path = shape.path(in: CGRect(origin: .zero, size: size))
                 // Gradient tail — overlapping thin segments, fading fast. Each
                 // overlaps ~6 steps into its neighbour so the line stays even
-                // around corners.
+                // around corners. Fade AND width taper together (founder polish,
+                // 2026-07-10): opacity-only fading kept a constant-width stroke
+                // that ended blunt — a real comet thins to nothing at the tip.
                 for i in stride(from: segments - 1, through: 0, by: -1) {
                     let f = CGFloat(i)
-                    let fade = pow(Double(1 - f / CGFloat(segments)), 2.6)
+                    let t = 1 - f / CGFloat(segments)          // 0 at the tip → 1 at the head
+                    let fade = pow(Double(t), 2.6)
+                    let width = lineWidth * (0.2 + 0.65 * t)   // tip a hairline, head-adjacent ~0.85×
                     strokeComet(ctx, path, m.head - m.dir * (f + 6) * step, m.head - m.dir * f * step,
-                                color: .white.opacity(fade * 0.7), width: lineWidth * 0.85)
+                                color: .white.opacity(fade * 0.7), width: width)
                 }
-                // Bright head.
-                strokeComet(ctx, path, m.head - 0.008, m.head + 0.008, color: .white, width: lineWidth)
+                // Bright head with a hotter core — the comet's focal point.
+                strokeComet(ctx, path, m.head - 0.008, m.head + 0.008, color: .white.opacity(0.9), width: lineWidth)
+                strokeComet(ctx, path, m.head - 0.004, m.head + 0.004, color: .white, width: lineWidth * 1.25)
             }
             // Soft glow via shadow — blooms symmetrically on both sides.
             .shadow(color: .white.opacity(glow), radius: 3)
