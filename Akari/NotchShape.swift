@@ -148,9 +148,14 @@ struct BorderComet<S: Shape>: View {
                     let f = CGFloat(i)
                     let t = 1 - f / CGFloat(segments)          // 0 at the tip → 1 at the head
                     let fade = pow(Double(t), 2.6)
+                    // Body brightness caps at 0.7, then a steep end-blend lifts the
+                    // last ~15% to EXACTLY the head's 1.0 — the flat 0.7 ramp left a
+                    // visible brightness seam where the head stroke ended (founder
+                    // screenshot: "not smooth at the nose").
+                    let alpha = min(1.0, fade * 0.7 + pow(Double(t), 10) * 0.35)
                     let width = lineWidth * (0.2 + 0.8 * t)    // hairline tip → FULL width at the head
                     strokeComet(ctx, path, m.head - m.dir * (f + 2) * step, m.head - m.dir * f * step,
-                                color: .white.opacity(fade * 0.7), width: width, cap: .butt)
+                                color: .white.opacity(alpha), width: width, cap: .butt)
                 }
                 // Bright head at the SAME width the tail ramps into — round cap
                 // for the clean nose; the glow shadows carry the head emphasis.
