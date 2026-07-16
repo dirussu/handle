@@ -586,10 +586,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         presentConversation(convo)
     }
 
-    /// User tapped Stop — cancel the running turn. The loop checks Task.isCancelled
-    /// at each step and bails; runToolLoop's defer finalizes the streaming message
-    /// (conversation.stopStreaming), so the panel unsticks cleanly.
+    /// One submitted turn: user message (fresh ambient capture) → the loop.
+    /// Called from the input bar (idle path) AND the queue drain.
+    private func runSubmittedTurn(text: String, in conversation: Conversation) {
+        // Track this turn as the active task so the Stop button can cancel it
+        // (the loop checks Task.isCancelled at each step; its defer cleans up).
+        activeTask?.cancel()
+        activeTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            // Thinking starts at the TAP: the pre-work before the first token
+            // (capture, AX probe, manifest, gating) took ~2s during which
+            // nothing moved (founder). Loop exits reset this via stopStreaming.
+            conversation.isAwaitingResponse = true
+            let attachedPDF = conversation.pendingPDF
+            conversation.clearPendingPDF()
+
+            if let pdf = attachedPDF {
+                conversation.addUserMessage(text, pdfData: pdf.data, pdfFilename: pdf.filename)
+            } else {
+                // Ambient sight: route to the visible screen, a specific
+                // (even occluded) window, or a pure text turn — and hand
+                // the model a manifest of what's open. See handleAmbientTurn.
+                await self.handleAmbientTurn(text: text, in: conversation)
+            }
+
+            await self.runToolLoop(in: conversation, isInitial: false, action: conversation.initialAction)
+        }
+    }
+
+    /// User tapped Stop — cancel the running turn AND drop the queue (stopping
+    /// means "halt everything", not "run the next one"). The loop checks
+    /// Task.isCancelled at each step and bails; runToolLoop's defer finalizes
+    /// the streaming message (conversation.stopStreaming), so the panel
+    /// unsticks cleanly.
     private func stopGeneration() {
+        activeConversation?.queuedTexts.removeAll()
         activeTask?.cancel()
         activeTask = nil
     }
@@ -599,30 +630,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             conversation: conversation,
             onSubmit: { [weak self] text in
                 guard let self else { return }
-                // Track this turn as the active task so the Stop button can cancel it
-                // (the loop checks Task.isCancelled at each step; its defer cleans up).
-                self.activeTask?.cancel()
-                self.activeTask = Task { @MainActor [weak self] in
-                    guard let self else { return }
-                    // Thinking starts at the TAP: the pre-work before the first
-                    // token (capture, AX probe, manifest, gating) took ~2s during
-                    // which nothing moved (founder). The loop's exit paths reset
-                    // this via stopStreaming.
-                    conversation.isAwaitingResponse = true
-                    let attachedPDF = conversation.pendingPDF
-                    conversation.clearPendingPDF()
-
-                    if let pdf = attachedPDF {
-                        conversation.addUserMessage(text, pdfData: pdf.data, pdfFilename: pdf.filename)
-                    } else {
-                        // Ambient sight: route to the visible screen, a specific
-                        // (even occluded) window, or a pure text turn — and hand
-                        // the model a manifest of what's open. See handleAmbientTurn.
-                        await self.handleAmbientTurn(text: text, in: conversation)
-                    }
-
-                    await self.runToolLoop(in: conversation, isInitial: false, action: conversation.initialAction)
+                // A turn is running → QUEUE (founder ask): the message runs when
+                // the current reply finishes, in order. Previously this path
+                // silently CANCELLED the running turn.
+                if self.isAgentRunning {
+                    conversation.queuedTexts.append(text)
+                    return
                 }
+                self.runSubmittedTurn(text: text, in: conversation)
             },
             onAddPDF: { [weak self] in
                 Task { @MainActor in
@@ -693,6 +708,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if !NotchController.shared.isPanelOpen {
                 let last = conversation.visibleMessages.last
                 NotchController.shared.notifyResult((last?.text).map { String($0.prefix(800)) } ?? "Done")
+            }
+            // Drain the queue: messages typed during this turn run now, in
+            // order — unless the user hit Stop (cancel clears the queue, and a
+            // cancelled turn must not resurrect work).
+            if !Task.isCancelled, !conversation.queuedTexts.isEmpty {
+                let next = conversation.queuedTexts.removeFirst()
+                agentLog.info("queue: draining next message (\(conversation.queuedTexts.count) left)")
+                Task { @MainActor [weak self] in self?.runSubmittedTurn(text: next, in: conversation) }
             }
         }
 
@@ -1186,6 +1209,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     let deepReply = await self.streamOneTurn(in: deep, instr: "", display: false)
                     agentLog.info("identityeval [DEPTH who are you?] named=\(deepReply.lowercased().contains("akari")) → \(deepReply.prefix(220), privacy: .public)")
                     agentLog.info("identityeval DONE")
+                }
+                else if cmd == "__queuetest__" {
+                    // Message queue e2e: start a turn, queue a second mid-run
+                    // (what onSubmit does while isAgentRunning), and verify BOTH
+                    // answers land in order via the loop-exit drain.
+                    guard let self else { return }
+                    let convo = Conversation(chatWithApp: "")
+                    self.runSubmittedTurn(text: "what is 2+2? answer with just the number", in: convo)
+                    try? await Task.sleep(for: .seconds(1))
+                    convo.queuedTexts.append("what is 3+3? answer with just the number")
+                    agentLog.info("queuetest: queued second message mid-turn")
+                    for _ in 0..<60 {
+                        try? await Task.sleep(for: .seconds(2))
+                        let answers = convo.visibleMessages.filter { $0.role == .assistant && !$0.text.isEmpty }
+                        if answers.count >= 2 {
+                            agentLog.info("queuetest: DONE — answers in order: \"\(answers[0].text.prefix(40), privacy: .public)\" then \"\(answers[1].text.prefix(40), privacy: .public)\" queueLeft=\(convo.queuedTexts.count)")
+                            return
+                        }
+                    }
+                    agentLog.error("queuetest: TIMEOUT — second answer never arrived")
                 }
                 else if cmd == "__holdopttest__" {
                     // HOLD-⌥ GESTURE: drive the REAL HotkeyMonitor with synthetic

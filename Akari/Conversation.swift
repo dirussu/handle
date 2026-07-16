@@ -224,6 +224,11 @@ final class Conversation {
     // and skip the macro-generated `withMutation` notification). Reading
     // `messages` and assigning the whole array back guarantees the setter
     // fires, which is what makes the live chat panel re-render mid-stream.
+    /// Messages typed WHILE a turn runs (founder, 2026-07-10): they queue here
+    /// and the loop's exit drains them in order — each gets a fresh capture
+    /// when ITS turn starts. Stop clears the queue along with the turn.
+    var queuedTexts: [String] = []
+
     // Streaming presentation (founder, 2026-07-10: "typing isn't smooth"):
     // model tokens arrive in BURSTS — several words, then a pause — and every
     // burst re-parsed the markdown and re-laid-out the panel, which read as

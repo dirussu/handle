@@ -239,11 +239,21 @@ struct ConversationContent: View {
                 pdfPreview(pdf: pdf)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
+            // Queued messages (typed mid-turn) — a quiet count so the user knows
+            // their message wasn't lost; it runs when the current reply finishes.
+            if !conversation.queuedTexts.isEmpty {
+                Text(conversation.queuedTexts.count == 1
+                     ? "1 message queued — runs when this reply finishes"
+                     : "\(conversation.queuedTexts.count) messages queued — run when this reply finishes")
+                    .font(.akariCaption)
+                    .foregroundStyle(.white.opacity(0.45))
+                    .padding(.horizontal, 8)
+                    .transition(.opacity)
+            }
             HStack(spacing: AkariSpacing.m) {
                 // Attach a PDF — the one thing ambient sight can't reach (a
                 // document that isn't on a screen). Screenshots are no longer a
-                // manual action: Akari captures the screen / the named window
-                // itself, and ⌥⌥ stays as the region-grab power move.
+                // manual action: Akari captures the screen / the named window itself.
                 Button(action: onAddPDF) {
                     Image(systemName: "paperclip")
                         .font(.system(size: 15, weight: .medium))
@@ -255,13 +265,14 @@ struct ConversationContent: View {
                 .help("Attach a PDF")
                 .disabled(conversation.isAwaitingResponse)
 
+                // NOT disabled while a turn runs — typing mid-turn queues the
+                // message (founder ask); Enter submits into the queue.
                 TextField(conversation.visibleMessages.isEmpty ? "Ask Akari…" : "Reply…", text: $conversation.inputDraft, axis: .vertical)
                     .textFieldStyle(.plain)
                     .font(.akariBody)
                     .tint(.white)   // white caret + selection (DESIGN.md: white-only accent)
                     .focused($inputFocused)
                     .lineLimit(1...4)
-                    .disabled(conversation.isAwaitingResponse)
                     .onSubmit { submit() }
 
                 // Click-to-talk mic — for users who'd rather tap than hold the
@@ -366,8 +377,10 @@ struct ConversationContent: View {
     }
 
     private var canSubmit: Bool {
-        guard !conversation.isAwaitingResponse else { return false }
         let trimmed = conversation.inputDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        // While a turn runs, plain text still submits — it QUEUES (the app-side
+        // handler routes it) and runs when the reply finishes. PDFs don't queue.
+        if conversation.isAwaitingResponse { return !trimmed.isEmpty }
         return !trimmed.isEmpty
             || conversation.pendingPDF != nil
     }
