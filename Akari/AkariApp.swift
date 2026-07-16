@@ -604,6 +604,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.activeTask?.cancel()
                 self.activeTask = Task { @MainActor [weak self] in
                     guard let self else { return }
+                    // Thinking starts at the TAP: the pre-work before the first
+                    // token (capture, AX probe, manifest, gating) took ~2s during
+                    // which nothing moved (founder). The loop's exit paths reset
+                    // this via stopStreaming.
+                    conversation.isAwaitingResponse = true
                     let attachedPDF = conversation.pendingPDF
                     conversation.clearPendingPDF()
 
@@ -674,6 +679,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard !isAgentRunning else { agentLog.info("runToolLoop: re-entry ignored (already running)"); return }
         isAgentRunning = true
         NotchController.shared.setWorking(true)
+        conversation.isAwaitingResponse = true   // bubble comet from the first instant, on every path (typed, voice, capture)
         defer {
             isAgentRunning = false
             NotchController.shared.setWorking(false)
