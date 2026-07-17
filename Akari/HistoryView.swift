@@ -258,11 +258,9 @@ private struct HistoryRow: View {
         .onHover { hovering = $0 }
     }
 
+    // Just the relative time — app name and turn count were noise (founder,
+    // 2026-07-10); the preview line above carries the recognition load.
     private var subtitle: String {
-        var parts: [String] = []
-        if !summary.appName.isEmpty { parts.append(summary.appName) }
-        parts.append(Self.rel.localizedString(for: summary.updatedAt, relativeTo: Date()))
-        parts.append("\(summary.messageCount) turn\(summary.messageCount == 1 ? "" : "s")")
-        return parts.joined(separator: " · ")
+        Self.rel.localizedString(for: summary.updatedAt, relativeTo: Date())
     }
 }
