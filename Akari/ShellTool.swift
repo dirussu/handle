@@ -104,18 +104,33 @@ final class ShellTool {
             throw ShellToolError.ioFailed("Couldn't start process: \(error.localizedDescription)")
         }
 
+        // Drain the pipes WHILE waiting — a pipe buffer is ~64KB, and a command
+        // with more output (any build log) blocks writing to a full pipe, never
+        // exits, and used to be falsely reported as a timeout with its output
+        // lost. Reading concurrently keeps the pipes flowing.
+        let outHandle = outPipe.fileHandleForReading
+        let errHandle = errPipe.fileHandleForReading
+        let outTask = Task.detached { outHandle.readDataToEndOfFile() }
+        let errTask = Task.detached { errHandle.readDataToEndOfFile() }
+
         // Wait with a timeout.
         let deadline = Date().addingTimeInterval(Self.timeoutSeconds)
         while process.isRunning && Date() < deadline {
             try await Task.sleep(for: .milliseconds(50))
         }
+        var timedOut = false
         if process.isRunning {
             process.terminate()
-            return ("(timed out after \(Int(Self.timeoutSeconds))s)", -1)
+            timedOut = true
         }
 
-        let outData = outPipe.fileHandleForReading.readDataToEndOfFile()
-        let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
+        let outData = await outTask.value
+        let errData = await errTask.value
+        if timedOut {
+            let partial = String(data: outData + errData, encoding: .utf8) ?? ""
+            return ("(timed out after \(Int(Self.timeoutSeconds))s)"
+                    + (partial.isEmpty ? "" : "\n--- output before timeout ---\n" + partial.prefix(10_000)), -1)
+        }
 
         let maxBytes = 50_000
         var combined = ""

@@ -1113,10 +1113,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let pretty = ["purpose": "What it does", "title": "Title", "start_iso": "Starts", "end_iso": "Ends",
                       "due_iso": "Due", "priority": "Priority", "path": "File", "src": "From", "dst": "To",
                       "location": "Location", "notes": "Notes", "to": "To", "subject": "Subject",
-                      "body": "Body", "message": "Message", "content": "Contents", "script": "Script"]
+                      "body": "Body", "message": "Message", "content": "Contents", "script": "Script",
+                      "command": "Command", "working_directory": "In folder"]
         // Long fields (content, script) go LAST; everything else reads top-down.
         let order = ["purpose", "title", "start_iso", "end_iso", "due_iso", "priority", "to", "subject",
-                     "location", "notes", "path", "src", "dst", "message", "body", "content", "script"]
+                     "location", "notes", "path", "src", "dst", "command", "working_directory",
+                     "message", "body", "content", "script"]
         func rank(_ k: String) -> Int { order.firstIndex(of: k) ?? order.count }
         return args
             .sorted { rank($0.key) < rank($1.key) }
@@ -1209,6 +1211,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     let deepReply = await self.streamOneTurn(in: deep, instr: "", display: false)
                     agentLog.info("identityeval [DEPTH who are you?] named=\(deepReply.lowercased().contains("akari")) → \(deepReply.prefix(220), privacy: .public)")
                     agentLog.info("identityeval DONE")
+                }
+                else if cmd == "__shelltest__" {
+                    // Shell tool: quick command, the BIG-OUTPUT case (>64KB used
+                    // to deadlock the pipe and masquerade as a timeout), and the
+                    // disabled refusal. Enabled flag saved/restored.
+                    let wasEnabled = ShellTool.shared.isEnabled
+                    ShellTool.shared.setEnabled(true)
+                    do {
+                        let cwd = try WorkspaceManager.shared.ensureWorkspaceExists()
+                        let quick = try await ShellTool.shared.run(command: "echo hello && pwd", cwd: cwd)
+                        agentLog.info("shelltest: quick exit=\(quick.exitCode) out=\"\(quick.output.prefix(60), privacy: .public)\" (want 0, hello + path)")
+                        let big = try await ShellTool.shared.run(command: "seq 1 30000", cwd: cwd)
+                        let completed = big.exitCode == 0 && big.output.contains("truncated")
+                        agentLog.info("shelltest: big-output exit=\(big.exitCode) len=\(big.output.count) truncated=\(big.output.contains("truncated")) completedNotTimeout=\(completed) (want true)")
+                    } catch {
+                        agentLog.error("shelltest: FAILED — \(error.localizedDescription, privacy: .public)")
+                    }
+                    ShellTool.shared.setEnabled(false)
+                    agentLog.info("shelltest: disabled tools visible=\(ShellTool.tools.count) (want 0)")
+                    ShellTool.shared.setEnabled(wasEnabled)
+                    agentLog.info("shelltest: DONE (enabled restored to \(wasEnabled))")
                 }
                 else if cmd == "__queuetest__" {
                     // Message queue e2e: start a turn, queue a second mid-run
