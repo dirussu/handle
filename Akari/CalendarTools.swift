@@ -190,6 +190,22 @@ final class CalendarTools {
         return event
     }
 
+    /// Now → the end of tomorrow, non-all-day, capped — the personal-context
+    /// digest's fetch. Authorized-only: a background injection must never
+    /// trigger a permission prompt.
+    func upcomingForDigest(limit: Int = 8) -> [EKEvent] {
+        let status = EKEventStore.authorizationStatus(for: .event)
+        guard status == .fullAccess || status == .authorized else { return [] }
+        let cal = Calendar.current
+        let now = Date()
+        let end = cal.date(byAdding: .day, value: 2, to: cal.startOfDay(for: now)) ?? now
+        let predicate = store.predicateForEvents(withStart: now, end: end, calendars: nil)
+        return Array(store.events(matching: predicate)
+            .filter { !$0.isAllDay && $0.startDate != nil }
+            .sorted { $0.startDate < $1.startDate }
+            .prefix(limit))
+    }
+
     /// Non-all-day events starting within the next `minutes` — the calendarSoon
     /// trigger's poll. Returns [] without access (a timer must never prompt;
     /// the permission is primed at save time while the user is present).

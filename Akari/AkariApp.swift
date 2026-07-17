@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import EventKit
 import UniformTypeIdentifiers
 import UserNotifications
 import KeyboardShortcuts
@@ -74,6 +75,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Akari's primary surface: the notch. Install it at launch so the
         // closed pill is resident from the first frame.
         NotchController.shared.install()
+
+        // Warm the model in the background so the FIRST question doesn't pay
+        // the ~20s lazy load (founder, 2026-07-10). ensureVisionModel is
+        // idempotent and race-safe — a real turn arriving mid-load awaits the
+        // same in-flight task. The 3s delay keeps launch itself snappy.
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(3))
+            let t0 = Date()
+            if (try? await LocalEngine.shared.ensureVisionModel()) != nil {
+                agentLog.info("warmup: vision model resident (\(String(format: "%.1f", Date().timeIntervalSince(t0)), privacy: .public)s)")
+            }
+        }
 
         // Chats page → reopen a saved conversation (text-only, continuable).
         NotchController.shared.onOpenSaved = { [weak self] id in
@@ -614,6 +627,59 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Does the prompt touch the user's calendar/reminder world? Loose on
+    /// purpose — a false positive costs ~30ms + a few tokens, nothing else.
+    func promptAsksPersonalContext(_ text: String) -> Bool {
+        let t = text.lowercased()
+        return ["calendar", "meeting", "event", "appointment", "schedule", "agenda",
+                "reminder", "remind", "to-do", "todo", " due", "task", "today", "tomorrow"]
+            .contains { t.contains($0) }
+    }
+
+    /// Fresh events (now → end of tomorrow) + incomplete reminders, from the
+    /// sources the user has ALREADY authorized — never prompts.
+    private func personalContextDigest() async -> String {
+        var events: [(title: String, start: Date)]?
+        let evStatus = EKEventStore.authorizationStatus(for: .event)
+        if evStatus == .fullAccess || evStatus == .authorized {
+            events = CalendarTools.shared.upcomingForDigest().map { ($0.title ?? "event", $0.startDate) }
+        }
+        var reminders: [String]?
+        let remStatus = EKEventStore.authorizationStatus(for: .reminder)
+        if remStatus == .fullAccess || remStatus == .authorized {
+            reminders = (try? await ReminderTools.shared.listReminders(from: ListRemindersInput(state: "incomplete")))
+                .map { Array($0.prefix(8)).map { $0.title ?? "reminder" } }
+        }
+        return Self.formatPersonalDigest(events: events, reminders: reminders)
+    }
+
+    /// Pure formatter. nil source = NOT AUTHORIZED → omitted entirely (never
+    /// claim an empty calendar we can't actually see); authorized-but-empty
+    /// says "none" so the model can answer that fast, truthfully.
+    static func formatPersonalDigest(events: [(title: String, start: Date)]?, reminders: [String]?, now: Date = Date()) -> String {
+        guard events != nil || reminders != nil else { return "" }
+        var lines = ["[The user's calendar and reminders, fetched just now:"]
+        if let events {
+            if events.isEmpty {
+                lines.append("Events: none today or tomorrow")
+            } else {
+                let cal = Calendar.current
+                let fmt = DateFormatter(); fmt.dateFormat = "HH:mm"
+                let parts = events.map { e -> String in
+                    let day = cal.isDateInToday(e.start) ? "today" : (cal.isDateInTomorrow(e.start) ? "tomorrow" : fmt.string(from: e.start))
+                    return "\(day) \(fmt.string(from: e.start)) \(e.title)"
+                }
+                lines.append("Events: " + parts.joined(separator: "; "))
+            }
+        }
+        if let reminders {
+            lines.append(reminders.isEmpty ? "Reminders: none incomplete"
+                                           : "Reminders (incomplete): " + reminders.joined(separator: "; "))
+        }
+        lines.append("For questions about these, answer directly from this list — don't call the read tools. For creating or changing anything, still use the tools.]")
+        return lines.joined(separator: "\n")
+    }
+
     /// Give the chat a model-written 2–4 word title after its first real
     /// exchange (founder, 2026-07-10: raw first lines made the list
     /// unscannable). Once per conversation; flag set even when the model's
@@ -813,6 +879,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             conversation.pendingMemory = MemoryStore.preamble(for: facts)
             if !facts.isEmpty {
                 agentLog.info("memory: injecting \(facts.count) fact(s) for this turn")
+            }
+        }
+
+        // Personal-context injection (founder, 2026-07-10): calendar/reminder-
+        // shaped prompts get a FRESH digest (EventKit is milliseconds) folded
+        // into the same slot — the model answers in ONE pass instead of a tool
+        // round trip. Authorized sources only; a false-positive gate hit just
+        // costs a few tokens.
+        if promptAsksPersonalContext(userText) {
+            let digest = await personalContextDigest()
+            if !digest.isEmpty {
+                conversation.pendingMemory += (conversation.pendingMemory.isEmpty ? "" : "\n\n") + digest
+                agentLog.info("context: personal digest injected")
             }
         }
 
@@ -2674,6 +2753,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let back = Conversation.restore(from: snap)
             check("restore keeps title through re-save", back.snapshot()?.title == "Calendar check")
         }
+        // Personal-context injection — gate + the never-lie formatter rules
+        check("ctx gate calendar", promptAsksPersonalContext("whats on my calendar?"))
+        check("ctx gate due", promptAsksPersonalContext("anything due this week?"))
+        check("ctx gate tomorrow", promptAsksPersonalContext("what am I doing tomorrow"))
+        check("ctx gate haiku → false", !promptAsksPersonalContext("write a haiku about cats"))
+        check("ctx digest both nil → empty", Self.formatPersonalDigest(events: nil, reminders: nil).isEmpty)
+        check("ctx digest unauthorized omitted", !Self.formatPersonalDigest(events: [], reminders: nil).contains("Reminders"))
+        check("ctx digest empty says none", Self.formatPersonalDigest(events: [], reminders: []).contains("Events: none"))
+        let ctxDigest = Self.formatPersonalDigest(events: [(title: "Standup", start: Date().addingTimeInterval(3600))], reminders: ["water plants"])
+        check("ctx digest renders event", ctxDigest.contains("today") && ctxDigest.contains("Standup"))
+        check("ctx digest renders reminder", ctxDigest.contains("water plants"))
+        check("ctx digest write guidance", ctxDigest.contains("still use the tools"))
         // MCP fill (v2 #1 increment ②) — schema condenser, fill prompt, eval matcher
         let fillSchema: [String: Any] = ["type": "object",
             "properties": ["path": ["type": "string", "description": "the file path"],
