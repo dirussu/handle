@@ -11,14 +11,24 @@ struct HistoryBody: View {
     @State private var loaded = false
     @State private var confirmClear = false
     @State private var clearHover = false
+    @State private var searchText = ""
+    @State private var totalCount = 0
 
     var body: some View {
         VStack(alignment: .leading, spacing: AkariSpacing.s) {
-            if rows.isEmpty && loaded {
+            if rows.isEmpty && loaded && searchText.isEmpty {
                 emptyState
             } else {
+                searchField
                 ScrollView {
                     VStack(alignment: .leading, spacing: AkariSpacing.l) {
+                        if rows.isEmpty && loaded {
+                            Text("No chats match “\(searchText)”.")
+                                .font(.akariBody)
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .center)
+                                .padding(.top, 40)
+                        }
                         ForEach(groups, id: \.label) { group in
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(group.label)   // "Yesterday" as written — no caps treatment (founder call); tracking went with it, wide-tracked lowercase reads as a mistake
@@ -38,6 +48,15 @@ struct HistoryBody: View {
                                     }
                                 }
                             }
+                        }
+                        // Older chats exist but aren't listed — say so, and say
+                        // how to reach them (they were silently unreachable).
+                        if searchText.isEmpty, totalCount > rows.count {
+                            Text("Showing the latest \(rows.count) of \(totalCount) — search reaches them all.")
+                                .font(.akariMicro)
+                                .foregroundStyle(.white.opacity(0.35))
+                                .frame(maxWidth: .infinity, alignment: .center)
+                                .padding(.top, 6)
                         }
                     }
                     // Clear the top fade zone at rest — the first group header
@@ -139,8 +158,44 @@ struct HistoryBody: View {
         }
     }
 
+    // Search — case-insensitive, over titles AND message text; empty query =
+    // the recent list. Local SQLite, so live per-keystroke is fine.
+    private var searchField: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 11))
+                .foregroundStyle(.white.opacity(0.4))
+            TextField("Search chats…", text: $searchText)
+                .textFieldStyle(.plain)
+                .font(.akariBody)
+                .tint(.white)
+            if !searchText.isEmpty {
+                Button { searchText = "" } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 11))
+                }
+                .buttonStyle(.plain)
+                .akariIconHover(idle: .white.opacity(0.4))
+                .help("Clear search")
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .padding(.horizontal, 8)
+        .onChange(of: searchText) {
+            Task { await reload() }
+        }
+    }
+
     private func reload() async {
-        rows = await ConversationStore.shared.list()
+        let query = searchText.trimmingCharacters(in: .whitespaces)
+        if query.isEmpty {
+            rows = await ConversationStore.shared.list()
+            totalCount = await ConversationStore.shared.count()
+        } else {
+            rows = await ConversationStore.shared.search(query)
+        }
         loaded = true
     }
 }

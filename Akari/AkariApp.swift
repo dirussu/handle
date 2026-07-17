@@ -1499,6 +1499,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         await store.delete(id: snap.id)
                         let afterDelete = await store.list()
                         agentLog.info("convstoretest: after delete list=\(afterDelete.count) (want 0)")
+                        // Search + count (the history-reach feature): title hit,
+                        // body hit, no-match, and literal-% escaping.
+                        let sc1 = Conversation(chatWithApp: "Probe")
+                        sc1.addUserMessage("plan the birthday party")
+                        sc1.commitAssistantMessage("Cake, candles, and a guest list.")
+                        let sc2 = Conversation(chatWithApp: "Probe")
+                        sc2.addUserMessage("weekly budget review")
+                        sc2.commitAssistantMessage("Spending is 12% under target.")
+                        if let s1 = sc1.snapshot(), let s2 = sc2.snapshot() {
+                            await store.save(s1); await store.save(s2)
+                            let byTitle = await store.search("birthday")
+                            let byBody = await store.search("guest list")
+                            let noHit = await store.search("zebra")
+                            let literalPct = await store.search("12%")
+                            let total = await store.count()
+                            agentLog.info("convstoretest: search title=\(byTitle.count) body=\(byBody.count) none=\(noHit.count) literal%=\(literalPct.count) count=\(total) (want 1,1,0,1,2)")
+                        }
+                        await store.deleteAll()
                     } else {
                         agentLog.info("convstoretest: ERROR — snapshot was nil")
                     }

@@ -109,6 +109,52 @@ actor ConversationStore {
         return out
     }
 
+    /// Total saved conversations — lets the list say "30 of 143" honestly.
+    func count() -> Int {
+        guard open() else { return 0 }
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM conversations", -1, &stmt, nil) == SQLITE_OK else { return 0 }
+        defer { sqlite3_finalize(stmt) }
+        return sqlite3_step(stmt) == SQLITE_ROW ? Int(sqlite3_column_int(stmt, 0)) : 0
+    }
+
+    /// Case-insensitive substring search over titles AND message text —
+    /// newest-first summaries. This is how anything older than the recent
+    /// list stays reachable (founder, 2026-07-10). `%`/`_` in the query are
+    /// escaped so they match literally.
+    func search(_ query: String, limit: Int = 50) -> [ConversationSummary] {
+        guard open() else { return [] }
+        let escaped = query
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "%", with: "\\%")
+            .replacingOccurrences(of: "_", with: "\\_")
+        let pattern = "%" + escaped + "%"
+        let sql = """
+            SELECT c.id, c.title, c.app_name, c.updated_at,
+                   (SELECT COUNT(*) FROM messages m2 WHERE m2.conversation_id = c.id)
+            FROM conversations c
+            WHERE c.title LIKE ?1 ESCAPE '\\'
+               OR c.id IN (SELECT DISTINCT conversation_id FROM messages WHERE text LIKE ?1 ESCAPE '\\')
+            ORDER BY c.updated_at DESC LIMIT ?2
+            """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_text(stmt, 1, pattern, -1, transient)
+        sqlite3_bind_int(stmt, 2, Int32(limit))
+        var out: [ConversationSummary] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            out.append(ConversationSummary(
+                id: column(stmt, 0),
+                title: column(stmt, 1),
+                appName: column(stmt, 2),
+                updatedAt: Date(timeIntervalSince1970: sqlite3_column_double(stmt, 3)),
+                messageCount: Int(sqlite3_column_int(stmt, 4))
+            ))
+        }
+        return out
+    }
+
     func load(id: String) -> ConversationSnapshot? {
         guard open() else { return nil }
         var head: (title: String, app: String, created: Date, updated: Date)?
