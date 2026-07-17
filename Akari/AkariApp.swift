@@ -614,6 +614,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Give the chat a model-written 2–4 word title after its first real
+    /// exchange (founder, 2026-07-10: raw first lines made the list
+    /// unscannable). Once per conversation; flag set even when the model's
+    /// title is unusable (no retry loops — the first-line fallback stands).
+    /// Runs AFTER the loop, model idle, and re-saves the snapshot.
+    private func maybeGenerateTitle(for conversation: Conversation) async {
+        guard conversation.generatedTitle == nil, !isAgentRunning else { return }
+        let user = conversation.visibleMessages.first { $0.role == .user && !$0.text.isEmpty }?.text
+        let assistant = conversation.visibleMessages.first { $0.role == .assistant && !$0.text.isEmpty }?.text
+        guard let user, let assistant else { return }
+        conversation.generatedTitle = ""   // claim BEFORE the async call — no double generation
+        let reply = await askModel("""
+        Give this chat a title of 2 to 4 words. Reply with ONLY the title — no quotes, no punctuation.
+        Example — a chat about scheduling a dentist visit → Dentist appointment
+        Example — a chat asking to lower the volume → Volume change
+        The chat:
+        user: \(user.prefix(200))
+        assistant: \(assistant.prefix(200))
+        """)
+        if let title = Conversation.sanitizedTitle(reply) {
+            conversation.generatedTitle = title
+            agentLog.info("title: \"\(title, privacy: .public)\"")
+            if let snap = conversation.snapshot() {
+                Task.detached(priority: .utility) { await ConversationStore.shared.save(snap) }
+            }
+        } else {
+            agentLog.info("title: model reply unusable (\"\(reply.prefix(60), privacy: .public)\") — keeping the first-line fallback")
+        }
+    }
+
     /// User tapped Stop — cancel the running turn AND drop the queue (stopping
     /// means "halt everything", not "run the next one"). The loop checks
     /// Task.isCancelled at each step and bails; runToolLoop's defer finalizes
@@ -716,6 +746,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 let next = conversation.queuedTexts.removeFirst()
                 agentLog.info("queue: draining next message (\(conversation.queuedTexts.count) left)")
                 Task { @MainActor [weak self] in self?.runSubmittedTurn(text: next, in: conversation) }
+            } else if !Task.isCancelled {
+                // Model idle → give this chat a real title (once), off the hot path.
+                Task { @MainActor [weak self] in await self?.maybeGenerateTitle(for: conversation) }
             }
         }
 
@@ -2623,6 +2656,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         stopConvo.appendChunk(at: stopIdx, "partial answer that was still buffering")
         stopConvo.stopStreaming()
         check("stop flushes buffer", stopConvo.messages[stopIdx].text == "partial answer that was still buffering")
+        // Chat titles — sanitizer + snapshot preference + restore round-trip
+        check("title strips quotes/period", Conversation.sanitizedTitle("\"Dentist appointment.\"") == "Dentist appointment")
+        check("title strips emoji", Conversation.sanitizedTitle("Volume change 🔊") == "Volume change")
+        check("title rejects sentence", Conversation.sanitizedTitle("This chat was about scheduling a dentist appointment next week") == nil)
+        check("title rejects empty", Conversation.sanitizedTitle("  \"\" ") == nil)
+        check("title caps 40", Conversation.sanitizedTitle("Extraordinarily comprehensive calendarreview")!.count <= 40)
+        let titledConvo = Conversation(chatWithApp: "")
+        titledConvo.addUserMessage("whats in my calendar?")
+        titledConvo.commitAssistantMessage("Nothing today.")
+        titledConvo.generatedTitle = "Calendar check"
+        check("snapshot prefers generated title", titledConvo.snapshot()?.title == "Calendar check")
+        titledConvo.generatedTitle = ""   // in-flight claim must never persist
+        check("snapshot ignores claim marker", titledConvo.snapshot()?.title == "whats in my calendar?")
+        titledConvo.generatedTitle = "Calendar check"
+        if let snap = titledConvo.snapshot() {
+            let back = Conversation.restore(from: snap)
+            check("restore keeps title through re-save", back.snapshot()?.title == "Calendar check")
+        }
         // MCP fill (v2 #1 increment ②) — schema condenser, fill prompt, eval matcher
         let fillSchema: [String: Any] = ["type": "object",
             "properties": ["path": ["type": "string", "description": "the file path"],

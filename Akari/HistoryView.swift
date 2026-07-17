@@ -220,6 +220,14 @@ private struct HistoryRow: View {
                         .font(.akariBody)
                         .foregroundStyle(.white.opacity(0.92))
                         .lineLimit(1)
+                    // Last exchange, one dim line — recognition beats recall
+                    // when scanning (founder history pass, 2026-07-10).
+                    if !summary.preview.isEmpty {
+                        Text(summary.preview)
+                            .font(.akariCaption)
+                            .foregroundStyle(.white.opacity(0.38))
+                            .lineLimit(1)
+                    }
                     Text(subtitle)
                         .font(.system(size: 10))
                         .foregroundStyle(.secondary)

@@ -475,13 +475,35 @@ final class Conversation {
         }
         guard saved.contains(where: { $0.role != "tool" }) else { return nil }
         let firstUser = saved.first(where: { $0.role == "user" })?.text ?? "Conversation"
-        let title = String(firstUser.split(separator: "\n").first.map(String.init) ?? firstUser).prefix(60)
+        let fallback = String(String(firstUser.split(separator: "\n").first.map(String.init) ?? firstUser).prefix(60))
+        // "" is the in-flight claim marker (generation started, not landed) —
+        // never persist it; the first-line fallback stands until a real title.
+        let generated = (generatedTitle?.isEmpty == false) ? generatedTitle! : nil
         return ConversationSnapshot(id: persistentID,
-                                    title: String(title),
+                                    title: generated ?? fallback,
                                     appName: appName,
                                     createdAt: createdAt,
                                     updatedAt: Date(),
                                     messages: saved)
+    }
+
+    /// A model-written 2–4 word title (founder, 2026-07-10 — raw first lines
+    /// made the Chats list unscannable). Set once per conversation, after the
+    /// first real exchange; `snapshot()` prefers it. Restored conversations
+    /// carry their stored title here so a later save never regresses it.
+    var generatedTitle: String?
+
+    /// Clean a model-emitted title: strip quotes/trailing punctuation/emoji,
+    /// collapse whitespace, cap at 40 chars. nil = unusable (keep the fallback).
+    static func sanitizedTitle(_ raw: String) -> String? {
+        var t = withoutEmoji(raw)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "\"'“”‘’.。!?"))
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+        guard !t.isEmpty, t.count >= 3 else { return nil }
+        guard t.split(separator: " ").count <= 6 else { return nil }   // a sentence is not a title
+        if t.count > 40 { t = String(t.prefix(40)) }
+        return t
     }
 
     /// Rebuild a (text-only, continuable) conversation from a snapshot. The
@@ -491,6 +513,7 @@ final class Conversation {
         let convo = Conversation(chatWithApp: snap.appName,
                                  persistentID: snap.id,
                                  createdAt: snap.createdAt)
+        convo.generatedTitle = snap.title   // keep the stored title; never regress to first-line on re-save
         for m in snap.messages {
             switch m.role {
             case "user":      convo.addUserMessage(m.text)

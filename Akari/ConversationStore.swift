@@ -30,6 +30,7 @@ struct ConversationSummary: Sendable, Identifiable {
     let appName: String
     let updatedAt: Date
     let messageCount: Int
+    let preview: String        // last non-empty message text, one line — recognition beats recall in the list
 }
 
 /// SQLite-backed conversation history at
@@ -90,7 +91,9 @@ actor ConversationStore {
         var out: [ConversationSummary] = []
         let sql = """
             SELECT c.id, c.title, c.app_name, c.updated_at,
-                   (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id)
+                   (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id),
+                   (SELECT m3.text FROM messages m3 WHERE m3.conversation_id = c.id AND m3.text <> ''
+                    ORDER BY m3.idx DESC LIMIT 1)
             FROM conversations c ORDER BY c.updated_at DESC LIMIT ?1
             """
         var stmt: OpaquePointer?
@@ -103,7 +106,8 @@ actor ConversationStore {
                 title: column(stmt, 1),
                 appName: column(stmt, 2),
                 updatedAt: Date(timeIntervalSince1970: sqlite3_column_double(stmt, 3)),
-                messageCount: Int(sqlite3_column_int(stmt, 4))
+                messageCount: Int(sqlite3_column_int(stmt, 4)),
+                preview: Self.oneLine(column(stmt, 5))
             ))
         }
         return out
@@ -131,7 +135,9 @@ actor ConversationStore {
         let pattern = "%" + escaped + "%"
         let sql = """
             SELECT c.id, c.title, c.app_name, c.updated_at,
-                   (SELECT COUNT(*) FROM messages m2 WHERE m2.conversation_id = c.id)
+                   (SELECT COUNT(*) FROM messages m2 WHERE m2.conversation_id = c.id),
+                   (SELECT m3.text FROM messages m3 WHERE m3.conversation_id = c.id AND m3.text <> ''
+                    ORDER BY m3.idx DESC LIMIT 1)
             FROM conversations c
             WHERE c.title LIKE ?1 ESCAPE '\\'
                OR c.id IN (SELECT DISTINCT conversation_id FROM messages WHERE text LIKE ?1 ESCAPE '\\')
@@ -149,7 +155,8 @@ actor ConversationStore {
                 title: column(stmt, 1),
                 appName: column(stmt, 2),
                 updatedAt: Date(timeIntervalSince1970: sqlite3_column_double(stmt, 3)),
-                messageCount: Int(sqlite3_column_int(stmt, 4))
+                messageCount: Int(sqlite3_column_int(stmt, 4)),
+                preview: Self.oneLine(column(stmt, 5))
             ))
         }
         return out
@@ -202,6 +209,12 @@ actor ConversationStore {
         exec("DELETE FROM messages")
         exec("DELETE FROM conversations")
         exec("COMMIT")
+    }
+
+    /// First line of a message, trimmed for a list-row preview.
+    private static func oneLine(_ text: String) -> String {
+        let line = text.split(separator: "\n").first.map(String.init) ?? text
+        return String(line.trimmingCharacters(in: .whitespaces).prefix(90))
     }
 
     // MARK: - Private
