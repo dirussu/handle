@@ -245,10 +245,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         presentConversation(convo)
         agentLog.info("voice: command=\"\(transcript, privacy: .public)\" app=\(bundleID ?? "?", privacy: .public) ax=\(axElements.count)")
         await runToolLoop(in: convo, isInitial: false, action: convo.initialAction)
-        if VoiceSettings.speakReplies,
-           let reply = convo.messages.last(where: { $0.role == .assistant && !$0.text.isEmpty })?.text {
-            SpeechSynth.shared.speak(reply)
-        }
     }
 
     /// Force-enable accessibility on each app as it comes to the foreground, so
@@ -3107,9 +3103,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         check("stt clean brackets", SpeechService.clean("[BLANK_AUDIO] set the volume to 20 (silence)") == "set the volume to 20")
         check("stt clean tags", SpeechService.clean("<|startoftranscript|> click the send button") == "click the send button")
         check("stt clean plain", SpeechService.clean("  empty the trash  ") == "empty the trash")
-        check("tts strip markdown", SpeechSynth.spokenForm("**Clicked** `Send` [link](x)") == "Clicked Send link")
-        check("tts trims code", !SpeechSynth.spokenForm("hi ```swift\nlet x = 1\n``` bye").contains("let x"))
-        check("tts caps length", SpeechSynth.spokenForm(String(repeating: "word. ", count: 500)).count <= 601)
         // MCP config (v2 #1) — mcp.json parsing, command resolution, crash-loop guard
         let mcpJSON = #"{"mcpServers":{"weather":{"command":"npx","args":["-y","weather-mcp"],"env":{"KEY":"x"}},"files":{"command":"/usr/bin/python3","args":["/tmp/s.py"]}}}"#
         let mcpServers = MCPConfig.parse(Data(mcpJSON.utf8))

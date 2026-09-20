@@ -9,24 +9,6 @@ extension KeyboardShortcuts.Name {
     static let pushToTalk      = Self("pushToTalk")        // RETIRED (hold-⌥ replaced it) — kept so reset() can clear old bindings
 }
 
-/// Voice settings, UserDefaults-backed (read from non-UI code without SwiftUI).
-enum VoiceSettings {
-    private static let speakKey = "voice.speakReplies"
-    static var speakReplies: Bool {
-        get { UserDefaults.standard.bool(forKey: speakKey) }
-        set { UserDefaults.standard.set(newValue, forKey: speakKey) }
-    }
-}
-
-/// "Speak replies" toggle, bound to VoiceSettings (on-device TTS, off by default).
-private struct VoiceReplyToggle: View {
-    @State private var on = VoiceSettings.speakReplies
-    var body: some View {
-        Toggle("Speak replies aloud", isOn: $on)
-            .onChange(of: on) { _, v in VoiceSettings.speakReplies = v }
-    }
-}
-
 /// A settings section header — a small icon tile + title, replacing the weak
 /// default grouped-form header so the page is scannable at a glance. White-only
 /// (DESIGN.md): the hierarchy comes from the tile + type, never colour.
@@ -95,7 +77,6 @@ struct SettingsBody: View {
                         .foregroundStyle(.secondary)
                 }
                 KeyboardShortcuts.Recorder("Capture screen (chord):", name: .triggerCapture)
-                VoiceReplyToggle()
             } header: {
                 SettingsHeader(icon: "keyboard", title: "Hotkeys")
             } footer: {
