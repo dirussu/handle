@@ -208,6 +208,12 @@ struct ConversationContent: View {
                             .textSelection(.enabled)
                             .userBubble()
                     }
+                    // Looking is no longer silent: say whether the screenshot left the Mac.
+                    if let status = msg.screenshotStatus {
+                        Label(status.caption, systemImage: status.symbol)
+                            .font(.akariCaption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
         } else {

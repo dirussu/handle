@@ -177,6 +177,7 @@ enum MCPConfig {
 /// they're visible (and deletable) in Keychain Access.
 enum MCPKeychain {
     static let service = "com.dimarussu.Akari.mcp"
+    private static let store = SecretStore(service: service)   // one Keychain helper for the app (Akari/AI/SecretStore.swift)
 
     /// "keychain:API_KEY" → "API_KEY"; anything else → nil. Pure (self-tested);
     /// the SecItem calls below are covered by the live `__keychaintest__`.
@@ -188,53 +189,11 @@ enum MCPKeychain {
 
     /// Upsert one secret.
     @discardableResult
-    static func set(_ secret: String, for name: String) -> Bool {
-        delete(name)
-        let attrs: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: name,
-            kSecValueData as String: Data(secret.utf8),
-        ]
-        return SecItemAdd(attrs as CFDictionary, nil) == errSecSuccess
-    }
-
-    static func get(_ name: String) -> String? {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: name,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-        ]
-        var out: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &out) == errSecSuccess,
-              let data = out as? Data else { return nil }
-        return String(data: data, encoding: .utf8)
-    }
-
-    static func delete(_ name: String) {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: name,
-        ]
-        SecItemDelete(query as CFDictionary)
-    }
-
+    static func set(_ secret: String, for name: String) -> Bool { store.set(secret, for: name) }
+    static func get(_ name: String) -> String? { store.get(name) }
+    static func delete(_ name: String) { store.delete(name) }
     /// The names (never the secrets) of every stored token — for Settings.
-    static func allNames() -> [String] {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecReturnAttributes as String: true,
-            kSecMatchLimit as String: kSecMatchLimitAll,
-        ]
-        var out: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &out) == errSecSuccess,
-              let items = out as? [[String: Any]] else { return [] }
-        return items.compactMap { $0[kSecAttrAccount as String] as? String }.sorted()
-    }
+    static func allNames() -> [String] { store.allNames() }
 
     /// Resolve every `keychain:` reference in a config env. A missing secret
     /// resolves to "" (and logs) rather than leaking the sentinel to the child.
@@ -558,4 +517,13 @@ final class MCPService {
         }
         return text
     }
+}
+
+// MARK: - Cross-file helpers
+// MemberImportVisibility (Swift 6.4 / Xcode 27): members of MCP types are only
+// visible in files that `import MCP`. AkariApp.swift can't import it (MCP's
+// `Notification` clashes with Foundation's in the AppDelegate callbacks), so the
+// DEBUG harness reads tool names through here.
+extension MCPService {
+    nonisolated static func toolNames(_ tools: [MCP.Tool]) -> [String] { tools.map(\.name) }
 }

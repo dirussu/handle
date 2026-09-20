@@ -14,6 +14,10 @@ struct Message: Identifiable {
     /// Used to label the image in the prompt and to translate point_at coords.
     var imagePixelSize: CGSize?
 
+    /// What happened to this user message's screenshot (sent / withheld) —
+    /// rendered as a caption under the bubble. nil = no screenshot involved.
+    var screenshotStatus: ScreenshotStatus? = nil
+
     /// Optional PDF document attached to this user message.
     var pdfData: Data?
     /// Display name for the PDF (e.g. "contract.pdf"). Shown in the chat UI.
@@ -74,6 +78,15 @@ final class Conversation {
     /// Mutable so that recapture_screen can refresh after the screen state changes.
     var captureRect: CGRect       // display top-left origin, in points
     var captureScreen: NSScreen?
+    /// The app that was on screen for the current capture (for the consent card,
+    /// the status caption, and the excluded-apps check).
+    var capturedAppName: String?
+    var capturedBundleID: String?
+    /// A capture that was skipped this turn because the app is excluded — picked
+    /// up by the turn that would have used it (`takeCaptureWithheld`).
+    var captureWithheld: ScreenshotStatus?
+    /// Ask-before-send decision for the current user turn (nil = not asked yet).
+    var screenSendDecision: Bool?
     /// Pixel dimensions of the most-recent capture (after API preparation).
     /// Used by point_at to translate from image pixels to capture-rect points.
     var currentImagePixelSize: CGSize?
@@ -445,6 +458,17 @@ final class Conversation {
         self.captureScreen = screen
         self.currentImagePixelSize = imagePixelSize
         self.axElements = axElements
+    }
+
+    /// Mark the latest user message with what happened to its screenshot.
+    func markScreenshot(_ status: ScreenshotStatus) {
+        guard let i = messages.lastIndex(where: { $0.role == .user && !$0.isToolResultOnly }) else { return }
+        messages[i].screenshotStatus = status
+    }
+
+    func takeCaptureWithheld() -> ScreenshotStatus? {
+        defer { captureWithheld = nil }
+        return captureWithheld
     }
 
     // MARK: - Persistence (text-only snapshots — never captures/PDF bytes)

@@ -1,11 +1,7 @@
 import Foundation
 
-/// Where the model files live (PRODUCT.md "Model file management" + the
-/// Settings → Storage relocator). Everything downloads under ONE huggingface
-/// base — the VL model (mlx-swift Hub) and Whisper (WhisperKit/argmaxinc
-/// both resolve against the same layout) — so relocating means moving one
-/// folder and pointing the loaders at it.
-@MainActor
+/// Where on-device models live — since phase 5 that is only the WhisperKit voice
+/// model (`SpeechService`). Relocatable from Settings → Voice model storage.
 enum ModelStorage {
     private static let baseKey = "akari.models.base"
 

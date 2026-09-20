@@ -206,6 +206,18 @@ struct NotchRootView: View {
                             loops: false, period: 5.2, tailLength: 0.30, lineWidth: 2.0, glow: 0.9)
             }
         }
+        // Seeing glyph — a screenshot just left for the provider. Bottom-centre
+        // of the closed pill, gone after a moment (NotchController.flashSeeing).
+        .overlay(alignment: .bottom) {
+            if vm.phase == .closed && vm.isSeeing {
+                Image(systemName: "eye.fill")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.9))
+                    .padding(.bottom, 3)
+                    .transition(.opacity)
+            }
+        }
+        .animation(.easeInOut(duration: 0.25), value: vm.isSeeing)
         .contentShape(shape)
         .animation(vm.phase == .open ? openAnimation : closeAnimation, value: vm.phase)
         .onHover { handleHover($0) }

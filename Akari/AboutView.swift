@@ -35,15 +35,9 @@ enum AppInfo {
     /// texts is the final pre-distribution compliance step.)
     static let acknowledgements: [Acknowledgement] = [
         .init("WhisperKit",          "MIT",        "https://github.com/argmaxinc/WhisperKit"),
-        .init("MLX Swift",           "MIT",        "https://github.com/ml-explore/mlx-swift"),
-        .init("MLX Swift Examples",  "MIT",        "https://github.com/ml-explore/mlx-swift-examples"),
-        .init("swift-transformers",  "Apache-2.0", "https://github.com/huggingface/swift-transformers"),
-        .init("swift-jinja",         "Apache-2.0", "https://github.com/huggingface/swift-jinja"),
         .init("KeyboardShortcuts",   "MIT",        "https://github.com/sindresorhus/KeyboardShortcuts"),
         .init("swift-markdown-ui",   "MIT",        "https://github.com/gonzalezreal/swift-markdown-ui"),
         .init("NetworkImage",        "MIT",        "https://github.com/gonzalezreal/NetworkImage"),
-        .init("GzipSwift",           "MIT",        "https://github.com/1024jp/GzipSwift"),
         .init("swift-collections",   "Apache-2.0", "https://github.com/apple/swift-collections"),
-        .init("swift-numerics",      "Apache-2.0", "https://github.com/apple/swift-numerics"),
     ]
 }

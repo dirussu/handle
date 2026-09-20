@@ -25,6 +25,8 @@ final class NotchViewModel: ObservableObject {
     @Published var phase: NotchPhase = .closed
     @Published var route: NotchRoute = .chat
     @Published var isWorking: Bool = false
+    /// A screenshot just left the Mac — a brief eye glyph on the closed pill.
+    @Published var isSeeing: Bool = false
     @Published var pinned: Bool = false
     /// Cursor is near the notch (controller-fed, global mouse tracking). The
     /// closed pill paints ONLY then — instantly, before the cursor arrives — so

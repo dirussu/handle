@@ -316,6 +316,20 @@ final class NotchController {
         for n in notches { n.vm.isWorking = working }
     }
 
+    /// A screenshot is being sent to the provider: show the eye for a moment.
+    /// Brief and glanceable, not a modal (PROVIDERS.md phase 3).
+    func flashSeeing(seconds: Double = 1.8) {
+        install()
+        for n in notches { n.vm.isSeeing = true }
+        seeingTask?.cancel()
+        seeingTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(seconds))
+            guard !Task.isCancelled else { return }
+            for n in notches { n.vm.isSeeing = false }
+        }
+    }
+    private var seeingTask: Task<Void, Never>?
+
 
     /// The notch surface's current bottom edge on `screen`, in top-left screen
     /// coords (the window's top sits at the screen top). Anchors the pointer's

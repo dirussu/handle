@@ -1,8 +1,10 @@
 import SwiftUI
 import AppKit
 
-/// First-run gate + hardware verdict (PRODUCT.md: refuse below M1/16 GB
-/// rather than degrade). Pure logic split out so self-tests can hit it.
+/// First-run state. The old hardware GATE (refuse below M1/16 GB) is gone with
+/// the on-device model (PROVIDERS.md phase 2); what remains is a soft note —
+/// on-device voice (WhisperKit) wants Apple Silicon. Pure logic split out so
+/// self-tests can hit it.
 enum Onboarding {
     static let doneKey = "akari.onboarding.done"
 
@@ -11,10 +13,9 @@ enum Onboarding {
         set { UserDefaults.standard.set(newValue, forKey: doneKey) }
     }
 
-    /// The minimum bar: Apple Silicon + 16 GB.
-    static func hardwareOK(memGB: Int, isAppleSilicon: Bool) -> Bool {
-        isAppleSilicon && memGB >= 16
-    }
+    /// Voice transcription runs on-device (WhisperKit) and needs Apple Silicon.
+    /// Everything else works on any Mac that runs the app — no memory floor.
+    static func voiceSupported(isAppleSilicon: Bool) -> Bool { isAppleSilicon }
 
     static var currentMemGB: Int {
         Int(ProcessInfo.processInfo.physicalMemory / (1 << 30))
@@ -31,8 +32,9 @@ enum Onboarding {
 }
 
 /// The first-run walk-through, as a page inside the notch panel (the notch is
-/// the app's only surface). Four steps: hardware verdict → staged permissions
-/// (each with its rationale, skippable) → model disclosure + download → ready.
+/// the app's only surface). Four steps: welcome → staged permissions (each with
+/// its rationale, skippable) → connect your AI (provider + key, nothing
+/// preselected) → ready.
 ///
 /// Design: a first impression, not a form. A breathing glow hero, an oversized
 /// centered title (real size-contrast), and a staggered blur-in entrance so each
@@ -42,14 +44,13 @@ struct OnboardingBody: View {
     let onDone: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduce
     @State private var step = 0
-    private let hardwareOK = Onboarding.hardwareOK(memGB: Onboarding.currentMemGB,
-                                                   isAppleSilicon: Onboarding.currentIsAppleSilicon)
+    private let voiceOK = Onboarding.voiceSupported(isAppleSilicon: Onboarding.currentIsAppleSilicon)
 
     /// The panel height is intrinsic (the notch shape self-sizes to content),
     /// so a per-step height change makes the whole notch collapse + re-expand —
     /// reads as "closes then opens." Pinning ONE stable height across all steps
     /// keeps the notch still; the steps cross-dissolve inside it. Sized to the
-    /// tallest step (the model card); shorter steps centre in the space.
+    /// tallest step (the connect step); shorter steps centre in the space.
     private let stageHeight: CGFloat = 330
 
     var body: some View {
@@ -57,9 +58,9 @@ struct OnboardingBody: View {
             ZStack {
                 Group {
                     switch step {
-                    case 0:  WelcomeStep(hardwareOK: hardwareOK) { advance(to: 1) }
+                    case 0:  WelcomeStep(voiceOK: voiceOK) { advance(to: 1) }
                     case 1:  PermissionsFlow(onDone: { advance(to: 2) })
-                    case 2:  ModelStep(onContinue: { advance(to: 3) })
+                    case 2:  ConnectStep(onContinue: { advance(to: 3) })
                     default: ReadyStep(onDone: { Onboarding.isDone = true; onDone() })
                     }
                 }
@@ -199,7 +200,7 @@ private struct StepDots: View {
 // MARK: - Steps
 
 private struct WelcomeStep: View {
-    let hardwareOK: Bool
+    let voiceOK: Bool
     let onContinue: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduce
     @State private var appeared = false
@@ -209,59 +210,74 @@ private struct WelcomeStep: View {
             OnboardingHero(
                 icon: "lightbulb.fill",
                 title: "Welcome to Akari",
-                subtitle: "The private Mac AI in your notch. It sees your screen, answers, and acts — all on this Mac. Nothing you show or say ever leaves.",
+                subtitle: "The Mac AI in your notch. It sees your screen, answers, and acts — with the AI model you choose, under your own key. Akari itself keeps everything on this Mac.",
                 appeared: appeared, reduce: reduce)
 
-            if hardwareOK {
-                Button("Continue") { onContinue() }
-                    .buttonStyle(.akariSolidProminent)
-                    .appearIn(3, appeared, reduce)
-            } else {
-                Text("Akari needs an Apple Silicon Mac (M1 or later) with at least 16 GB of memory — below that, the local AI is too slow to be useful.")
-                    .font(.akariBody).foregroundStyle(.white.opacity(0.6))
+            if !voiceOK {
+                Text("Voice needs an Apple Silicon Mac — everything else works here.")
+                    .font(.akariCaption).foregroundStyle(.white.opacity(0.6))
                     .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
                     .appearIn(3, appeared, reduce)
-                Button("Quit Akari") { NSApp.terminate(nil) }
-                    .buttonStyle(.akariSolid)
-                    .appearIn(4, appeared, reduce)
             }
+            Button("Continue") { onContinue() }
+                .buttonStyle(.akariSolidProminent)
+                .appearIn(voiceOK ? 3 : 4, appeared, reduce)
         }
         .frame(maxWidth: .infinity)
         .onAppear { appeared = true }
     }
 }
 
-private struct ModelStep: View {
+/// Pick a provider, paste a key, see it answer. Nothing is preselected (founder
+/// decision: no default provider). Skipping is fine — Akari asks again in chat.
+struct ConnectStep: View {
     let onContinue: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduce
     @State private var appeared = false
+    @State private var picked: AIProviderKind? = AIConfig.provider
+    @State private var connected = false
 
     var body: some View {
-        VStack(spacing: AkariSpacing.xl) {
+        VStack(spacing: AkariSpacing.l) {
             OnboardingHero(
-                icon: "square.and.arrow.down.fill",
-                title: "The AI lives here",
-                subtitle: "Akari downloads its model once, then never needs the internet for AI again.",
+                icon: "key.fill",
+                title: "Connect your AI",
+                subtitle: "Akari is local software — it works with the model you choose, using your own key. Nothing is stored anywhere but this Mac.",
                 appeared: appeared, reduce: reduce)
 
-            VStack(alignment: .leading, spacing: AkariSpacing.s) {
-                Label("Qwen3-VL 4B — vision + language · ~2.5 GB", systemImage: "brain")
-                Label("Whisper — voice, added on first talk · ~0.6 GB", systemImage: "waveform")
-                Label("~3 GB on disk in total — downloaded once", systemImage: "internaldrive")
+            HStack(spacing: AkariSpacing.m) {
+                ForEach([AIProviderKind.anthropic, .openai]) { k in
+                    AIProviderCard(kind: k, selected: picked == k) {
+                        picked = k
+                        AIConfig.setProvider(k)
+                        connected = false
+                    }
+                }
             }
-            .font(.akariCaption).foregroundStyle(.white.opacity(0.6))
             .appearIn(3, appeared, reduce)
 
-            VStack(spacing: AkariSpacing.m) {   // the download + its skip are one action pair
-                OnboardingDownload(onFinished: onContinue)
+            if let picked, picked.isAvailable {
+                AIKeyField(kind: picked) { connected = true }
                     .appearIn(4, appeared, reduce)
-                Button("Skip — download on first use") { onContinue() }
+            } else {
+                Text("Running a model locally (LM Studio, Ollama)? Pick OpenAI, then set the server address in Settings → AI.")
+                    .font(.akariCaption).foregroundStyle(.white.opacity(0.5))
+                    .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
+                    .appearIn(4, appeared, reduce)
+            }
+
+            if connected {
+                Button("Continue") { onContinue() }
+                    .buttonStyle(.akariSolidProminent)
+                    .appearIn(5, appeared, reduce)
+            } else {
+                Button("Skip for now") { onContinue() }
                     .buttonStyle(.akariSolid)
                     .appearIn(5, appeared, reduce)
             }
         }
         .frame(maxWidth: .infinity)
-        .onAppear { appeared = true }
+        .onAppear { appeared = true; connected = AIConfig.state.isReady }   // a saved, working setup needs no re-test
     }
 }
 
@@ -274,7 +290,7 @@ private struct ReadyStep: View {
         ("eye", "\u{201C}What does this error mean?\u{201D}"),
         ("cursorarrow.rays", "\u{201C}Click the send button\u{201D}"),
         ("clock.arrow.circlepath", "\u{201C}Every day at 6pm, set my volume to 20\u{201D}"),
-        ("mic", "Or hold \u{2303}\u{2325}Space and just talk"),
+        ("mic", "Or hold \u{2325} and just talk"),
     ]
 
     var body: some View {
@@ -349,7 +365,7 @@ private struct PermissionsFlow: View {
     private static func makePerms() -> [Perm] {
         [
             Perm(id: "sr", icon: "rectangle.dashed.badge.record", name: "Screen Recording",
-                 why: "So Akari can see the screen you're asking about. The pixels are read on-device and never uploaded.",
+                 why: "So Akari can see the screen you're asking about. A screenshot is taken only when you ask about the screen, sent only to the AI you connected, and never stored.",
                  refresh: { PermissionsService.screenRecording() },
                  request: { PermissionsService.requestScreenRecording() },
                  settingsURL: PermissionsService.settingsURL(pane: "Privacy_ScreenCapture")),
@@ -494,47 +510,5 @@ private struct PermissionCard: View {
             try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
             onNext()
         }
-    }
-}
-
-/// Download button + live progress driven by LocalEngine's observable load
-/// state; failure shows the error and a Retry (ensureVisionModel resets its
-/// in-flight task on failure, so calling again really retries).
-private struct OnboardingDownload: View {
-    let onFinished: () -> Void
-    @ObservedObject private var engine = LocalEngine.shared
-    @State private var started = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            switch engine.visionState {
-            case .notLoaded:
-                Button("Download now") { start() }
-                    .buttonStyle(.akariSolid)
-            case .downloading(let f):
-                ProgressView(value: f) {
-                    Text(f < 0.001 ? "Starting download…" : "Downloading… \(Int(f * 100))%")
-                        .font(.system(size: 10)).foregroundStyle(.secondary)
-                }
-                .progressViewStyle(.linear)
-            case .loading:
-                ProgressView { Text("Loading the model…").font(.system(size: 10)).foregroundStyle(.secondary) }
-            case .ready:
-                Label("Model ready.", systemImage: "checkmark.circle.fill")
-                    .font(.akariBody).foregroundStyle(.green)
-                    .onAppear { if started { onFinished() } }
-            case .failed(let why):
-                Label("Download failed: \(why)", systemImage: "exclamationmark.triangle.fill")
-                    .font(.system(size: 10)).foregroundStyle(.red)
-                    .fixedSize(horizontal: false, vertical: true)
-                Button("Retry") { start() }
-                    .buttonStyle(.akariSolid)
-            }
-        }
-    }
-
-    private func start() {
-        started = true
-        Task { _ = try? await LocalEngine.shared.ensureVisionModel() }
     }
 }

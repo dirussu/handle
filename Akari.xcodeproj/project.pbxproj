@@ -7,9 +7,6 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		0B5BD5752FDFF0BE00CA19FA /* MLXLLM in Frameworks */ = {isa = PBXBuildFile; productRef = 0B5BD5742FDFF0BE00CA19FA /* MLXLLM */; };
-		0B5BD5772FDFF0BE00CA19FA /* MLXLMCommon in Frameworks */ = {isa = PBXBuildFile; productRef = 0B5BD5762FDFF0BE00CA19FA /* MLXLMCommon */; };
-		0B5BD5792FDFF0BE00CA19FA /* MLXVLM in Frameworks */ = {isa = PBXBuildFile; productRef = 0B5BD5782FDFF0BE00CA19FA /* MLXVLM */; };
 		0BC473EF2FAE022C00A52524 /* KeyboardShortcuts in Frameworks */ = {isa = PBXBuildFile; productRef = 0BC473EE2FAE022C00A52524 /* KeyboardShortcuts */; };
 		0BC474002FAE1A1A00A52524 /* MarkdownUI in Frameworks */ = {isa = PBXBuildFile; productRef = 0BC473FF2FAE1A1A00A52524 /* MarkdownUI */; };
 		3960FBE8EC7F8A14C0F675B2 /* WhisperKit in Frameworks */ = {isa = PBXBuildFile; productRef = C1110A8DE0A6D8F83F9B0F99 /* WhisperKit */; };
@@ -34,10 +31,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				0B5BD5792FDFF0BE00CA19FA /* MLXVLM in Frameworks */,
-				0B5BD5752FDFF0BE00CA19FA /* MLXLLM in Frameworks */,
 				0BC473EF2FAE022C00A52524 /* KeyboardShortcuts in Frameworks */,
-				0B5BD5772FDFF0BE00CA19FA /* MLXLMCommon in Frameworks */,
 				0BC474002FAE1A1A00A52524 /* MarkdownUI in Frameworks */,
 				3960FBE8EC7F8A14C0F675B2 /* WhisperKit in Frameworks */,
 			);
@@ -84,9 +78,6 @@
 			packageProductDependencies = (
 				0BC473EE2FAE022C00A52524 /* KeyboardShortcuts */,
 				0BC473FF2FAE1A1A00A52524 /* MarkdownUI */,
-				0B5BD5742FDFF0BE00CA19FA /* MLXLLM */,
-				0B5BD5762FDFF0BE00CA19FA /* MLXLMCommon */,
-				0B5BD5782FDFF0BE00CA19FA /* MLXVLM */,
 				C1110A8DE0A6D8F83F9B0F99 /* WhisperKit */,
 				E22A44DCA616C03089177565 /* MCP */,
 			);
@@ -121,7 +112,6 @@
 			packageReferences = (
 				0BC473ED2FAE022C00A52524 /* XCRemoteSwiftPackageReference "KeyboardShortcuts" */,
 				0BC473FE2FAE1A1A00A52524 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */,
-				0B5BD5732FDFF0BE00CA19FA /* XCRemoteSwiftPackageReference "mlx-swift-examples" */,
 				08F15245FDEC7E02B21F863F /* XCRemoteSwiftPackageReference "WhisperKit" */,
 				D663C79DF05110E26B4F81D9 /* XCRemoteSwiftPackageReference "swift-sdk" */,
 			);
@@ -400,14 +390,6 @@
 				minimumVersion = 1.0.0;
 			};
 		};
-		0B5BD5732FDFF0BE00CA19FA /* XCRemoteSwiftPackageReference "mlx-swift-examples" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/ml-explore/mlx-swift-examples";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 2.29.1;
-			};
-		};
 		0BC473ED2FAE022C00A52524 /* XCRemoteSwiftPackageReference "KeyboardShortcuts" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/sindresorhus/KeyboardShortcuts";
@@ -435,21 +417,6 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		0B5BD5742FDFF0BE00CA19FA /* MLXLLM */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 0B5BD5732FDFF0BE00CA19FA /* XCRemoteSwiftPackageReference "mlx-swift-examples" */;
-			productName = MLXLLM;
-		};
-		0B5BD5762FDFF0BE00CA19FA /* MLXLMCommon */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 0B5BD5732FDFF0BE00CA19FA /* XCRemoteSwiftPackageReference "mlx-swift-examples" */;
-			productName = MLXLMCommon;
-		};
-		0B5BD5782FDFF0BE00CA19FA /* MLXVLM */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 0B5BD5732FDFF0BE00CA19FA /* XCRemoteSwiftPackageReference "mlx-swift-examples" */;
-			productName = MLXVLM;
-		};
 		0BC473EE2FAE022C00A52524 /* KeyboardShortcuts */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 0BC473ED2FAE022C00A52524 /* XCRemoteSwiftPackageReference "KeyboardShortcuts" */;

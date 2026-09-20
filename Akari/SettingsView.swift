@@ -81,6 +81,10 @@ private struct SettingsEmptyState: View {
 struct SettingsBody: View {
     var body: some View {
         Form {
+            AISection()
+            SentSection()
+            SeeSection()
+
             Section {
                 LabeledContent("Capture") {
                     Text("Double-tap ⌥")
@@ -112,6 +116,267 @@ struct SettingsBody: View {
         }
         .formStyle(.grouped)
         .scrollIndicators(.never)   // kill the thick AppKit scroller — uniform with the rest
+    }
+}
+
+/// Which AI answers — provider (no default; the user picks), key (Keychain),
+/// model, a live Test, and the session's token cost. The honest privacy line
+/// lives in the footer (PROVIDERS.md: local software, your model).
+private struct AISection: View {
+    @State private var kind: AIProviderKind? = AIConfig.provider
+    @State private var model: String = AIConfig.model ?? AIConfig.provider?.defaultModel ?? ""
+    @ObservedObject private var engine = CloudEngine.shared
+    // OpenAI-compatible endpoint (phase 4)
+    @State private var baseURL: String = AIConfig.openAIBaseURLString
+    @State private var serverTools: Bool = AIConfig.openAISupportsTools
+    @State private var serverVision: Bool = AIConfig.openAISupportsVision
+    @State private var fetched: [String] = []
+    @State private var fetchStatus: String? = nil
+
+    var body: some View {
+        Section {
+            Picker("Provider", selection: $kind) {
+                Text("Not connected").tag(AIProviderKind?.none)
+                ForEach(AIProviderKind.allCases) { k in
+                    Text(k.isAvailable ? k.displayName : "\(k.displayName) — next update").tag(AIProviderKind?.some(k))
+                }
+            }
+            .onChange(of: kind) { _, k in
+                AIConfig.setProvider(k)
+                model = AIConfig.model ?? k?.defaultModel ?? ""
+            }
+            if let kind {
+                if !kind.isAvailable {
+                    Text("\(kind.displayName) support arrives in the next update — pick Claude (Anthropic) for now.")
+                        .font(.akariCaption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    AIKeyField(kind: kind, keyOptional: kind == .openai && AIConfig.openAIBaseURL != nil)
+                    if kind == .openai {
+                        // Model is a free id here (the real list comes from the server).
+                        HStack(spacing: 8) {
+                            TextField("Model id", text: $model)
+                                .textFieldStyle(.roundedBorder)
+                                .onSubmit { AIConfig.setModel(model) }
+                            Button("Fetch models…") { fetchModels() }
+                                .buttonStyle(.akariSolid)
+                        }
+                        .onChange(of: model) { _, m in AIConfig.setModel(m) }
+                        if !fetched.isEmpty {
+                            Picker("Available", selection: $model) {
+                                if !fetched.contains(model) { Text(model.isEmpty ? "—" : model).tag(model) }
+                                ForEach(fetched, id: \.self) { Text($0).tag($0) }
+                            }
+                        }
+                        if let fetchStatus {
+                            Text(fetchStatus).font(.akariCaption).foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        DisclosureGroup("Custom server (LM Studio, Ollama, OpenRouter…)") {
+                            HStack(spacing: 8) {
+                                TextField("Base URL — blank = api.openai.com", text: $baseURL)
+                                    .textFieldStyle(.roundedBorder)
+                                    .onSubmit { saveBaseURL() }
+                                Button("Save") { saveBaseURL() }.buttonStyle(.akariSolid)
+                            }
+                            Text("LM Studio: http://localhost:1234/v1 · Ollama: http://localhost:11434/v1 · OpenRouter: https://openrouter.ai/api/v1. A local server means nothing leaves this Mac — and no key is needed.")
+                                .font(.akariCaption).foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                            if AIConfig.openAIBaseURL != nil {
+                                Toggle("The model supports tool calls", isOn: $serverTools)
+                                    .onChange(of: serverTools) { _, v in AIConfig.openAISupportsTools = v }
+                                Toggle("The model can see images", isOn: $serverVision)
+                                    .onChange(of: serverVision) { _, v in AIConfig.openAISupportsVision = v }
+                                Text("Turn these off for a text-only or tool-less model: Akari then folds tool instructions into the prompt, and answers without screenshots.")
+                                    .font(.akariCaption).foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                    } else if !kind.knownModels.isEmpty {
+                        Picker("Model", selection: $model) {
+                            ForEach(kind.knownModels, id: \.self) { Text($0).tag($0) }
+                            if !model.isEmpty, !kind.knownModels.contains(model) { Text("Custom: \(model)").tag(model) }
+                        }
+                        .onChange(of: model) { _, m in AIConfig.setModel(m) }
+                    }
+                    if let url = kind.keyURL, !(kind == .openai && AIConfig.openAIBaseURL != nil) {
+                        HStack {
+                            Button("Get a \(kind.shortName) API key…") { NSWorkspace.shared.open(url) }
+                                .buttonStyle(.akariSolid)
+                            Spacer()
+                        }
+                    }
+                }
+            }
+            if engine.sessionUsage != .init() {
+                LabeledContent("This session") {
+                    Text(usageText).foregroundStyle(.secondary)
+                }
+            }
+        } header: {
+            SettingsHeader(icon: "sparkles", title: "AI")
+        } footer: {
+            Text("Akari is local software. Only the current conversation — and a screenshot when you ask about the screen — goes to the provider you chose, with your own key. Memory, chat history, voice, and screen reading stay on this Mac.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var usageText: String {
+        let u = engine.sessionUsage
+        var parts = ["\(AICost.formatTokens(u.input + u.cacheRead + u.cacheWrite)) in", "\(AICost.formatTokens(u.output)) out"]
+        if u.cacheRead > 0 { parts.append("\(AICost.formatTokens(u.cacheRead)) cached") }
+        var text = parts.joined(separator: " · ")
+        if AIConfig.isLocalEndpoint {
+            text += " · $0 · local"
+        } else if let d = AICost.estimate(model: engine.lastModel, input: u.input, output: u.output, cacheRead: u.cacheRead, cacheWrite: u.cacheWrite) {
+            text += " ≈ \(AICost.format(d))"
+        }
+        return text
+    }
+
+    private func saveBaseURL() {
+        AIConfig.setOpenAIBaseURL(baseURL)
+        baseURL = AIConfig.openAIBaseURLString
+        fetched = []; fetchStatus = nil
+    }
+
+    private func fetchModels() {
+        let base = AIConfig.openAIBaseURL ?? OpenAIProvider.defaultBaseURL
+        let key = SecretStore.providers.get("openai") ?? ""
+        fetchStatus = "Fetching from \(base.host ?? base.absoluteString)…"
+        Task {
+            do {
+                var ids = try await OpenAIProvider.fetchModels(baseURL: base, apiKey: key)
+                if base == OpenAIProvider.defaultBaseURL {   // OpenAI lists hundreds; keep the chat-capable families
+                    ids = ids.filter { $0.hasPrefix("gpt-") || $0.hasPrefix("o") || $0.hasPrefix("chatgpt") }
+                }
+                await MainActor.run { fetched = ids; fetchStatus = "\(ids.count) models" }
+            } catch {
+                await MainActor.run { fetched = []; fetchStatus = error.localizedDescription }
+            }
+        }
+    }
+}
+
+/// Everything that left the Mac this session — memory only (PRD principle 3,
+/// "show what you sent"): what the request was for, the screenshot thumbnail if
+/// one went along, tokens and the cost estimate.
+private struct SentSection: View {
+    @ObservedObject private var engine = CloudEngine.shared
+    @State private var expanded: Set<UUID> = []
+
+    var body: some View {
+        Section {
+            if engine.sent.isEmpty {
+                SettingsEmptyState(
+                    icon: "paperplane",
+                    title: "Nothing sent yet",
+                    hint: "Every request that leaves this Mac shows up here — memory only, cleared when Akari quits.")
+            } else {
+                ForEach(engine.sent.prefix(8)) { r in
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 8) {
+                            Image(systemName: r.imageThumbnail != nil ? "eye" : "text.bubble")
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 16)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(r.label).font(.body).lineLimit(1)
+                                Text(detail(r)).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                            }
+                            Spacer()
+                            Text(r.date, style: .time).font(.caption).foregroundStyle(.secondary)
+                            if r.imageThumbnail != nil {
+                                Button(expanded.contains(r.id) ? "Hide" : "Show") {
+                                    if expanded.contains(r.id) { expanded.remove(r.id) } else { expanded.insert(r.id) }
+                                }
+                                .buttonStyle(.akariSolid)
+                            }
+                        }
+                        if expanded.contains(r.id), let thumb = r.imageThumbnail {
+                            Image(decorative: thumb, scale: 1)
+                                .resizable()
+                                .aspectRatio(contentMode: .fit)
+                                .frame(maxHeight: 140)
+                                .clipShape(RoundedRectangle(cornerRadius: 6))
+                                .padding(.leading, 24)
+                        }
+                    }
+                }
+            }
+        } header: {
+            SettingsHeader(icon: "paperplane", title: "What was sent")
+        } footer: {
+            Text("Only the current conversation — and a screenshot when you ask about the screen — ever leaves. This list lives in memory and is gone when Akari quits.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    private func detail(_ r: SentRecord) -> String {
+        var parts = [r.model, "\(AICost.formatTokens(r.usage.input + r.usage.cacheRead + r.usage.cacheWrite)) in", "\(AICost.formatTokens(r.usage.output)) out"]
+        if r.imageBytes > 0 { parts.append("\(r.imageBytes / 1024) KB image") }
+        if let c = r.cost { parts.append("≈ \(AICost.format(c))") }
+        return parts.joined(separator: " · ")
+    }
+}
+
+/// Screen consent: ask before a screenshot leaves, and the apps that are never
+/// captured. Suggestions are offered, never pre-checked (founder).
+private struct SeeSection: View {
+    @State private var ask: Bool = SeeSettings.askBeforeSend
+    @State private var excluded: [String] = SeeSettings.excludedBundleIDs
+
+    var body: some View {
+        Section {
+            Toggle("Ask before sending a screenshot", isOn: $ask)
+                .onChange(of: ask) { _, v in SeeSettings.askBeforeSend = v }
+            if excluded.isEmpty {
+                Text("No excluded apps. When one of these is in front, Akari doesn't capture the screen at all — and says so.")
+                    .font(.akariCaption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                ForEach(excluded, id: \.self) { id in
+                    HStack(spacing: 8) {
+                        Image(systemName: "eye.slash").font(.system(size: 12)).foregroundStyle(.secondary).frame(width: 16)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(SeeSettings.displayName(for: id)).font(.body)
+                            Text(id).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                        Spacer()
+                        Button("Remove") { SeeSettings.include(id); excluded = SeeSettings.excludedBundleIDs }
+                            .buttonStyle(.akariSolid)
+                    }
+                }
+            }
+            let suggestions = SeeSettings.installedSuggestions().filter { !SeeSettings.isExcluded($0.id, in: excluded) }
+            HStack(spacing: 8) {
+                Button("Add app…", action: pickApp).buttonStyle(.akariSolid)
+                ForEach(suggestions, id: \.id) { s in
+                    Button("Exclude \(s.name)") { SeeSettings.exclude(s.id); excluded = SeeSettings.excludedBundleIDs }
+                        .buttonStyle(.akariSolid)
+                }
+                Spacer()
+            }
+        } header: {
+            SettingsHeader(icon: "eye", title: "Screen")
+        } footer: {
+            Text("A screenshot is taken only when your question is about the screen, and sent only to the provider you chose. Excluded apps are never captured. Voice never leaves this Mac either way.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    private func pickApp() {
+        let panel = NSOpenPanel()
+        panel.directoryURL = URL(fileURLWithPath: "/Applications")
+        panel.allowedContentTypes = [.application]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.message = "Choose an app Akari should never capture."
+        guard panel.runModal() == .OK, let url = panel.url,
+              let id = Bundle(url: url)?.bundleIdentifier else { return }
+        SeeSettings.exclude(id)
+        excluded = SeeSettings.excludedBundleIDs
     }
 }
 
@@ -658,9 +923,9 @@ private struct StorageSection: View {
                 Spacer()
             }
         } header: {
-            SettingsHeader(icon: "internaldrive", title: "Model storage")
+            SettingsHeader(icon: "internaldrive", title: "Voice model storage")
         } footer: {
-            Text("A move takes effect after you quit and reopen Akari.")
+            Text("The on-device Whisper model that transcribes your voice lives here (downloaded on first talk). A move takes effect after you quit and reopen Akari.")
                 .font(.caption).foregroundStyle(.secondary)
         }
         .onAppear(perform: refresh)
