@@ -53,12 +53,23 @@ actor AuditLog {
         return (o["ts"] as? String ?? "", tool, o["outcome"] as? String ?? "", o["summary"] as? String ?? "")
     }
 
-    /// The newest record for a tool label (e.g. "routine:Morning mail"), if any.
-    func lastRun(for label: String) -> (ts: String, outcome: String, summary: String)? {
-        for line in recent(400).reversed() {
-            if let r = Self.parseLine(line), r.tool == label { return (r.ts, r.outcome, r.summary) }
+    /// The newest finished record per label (one file pass). "started" lines are
+    /// skipped so an in-flight run doesn't masquerade as the last result.
+    func lastRuns(for labels: Set<String>) -> [String: (ts: String, outcome: String, summary: String)] {
+        var out: [String: (ts: String, outcome: String, summary: String)] = [:]
+        for line in recent(600).reversed() {
+            guard let r = Self.parseLine(line), labels.contains(r.tool), r.outcome != "started", out[r.tool] == nil else { continue }
+            out[r.tool] = (r.ts, r.outcome, r.summary)
+            if out.count == labels.count { break }
         }
-        return nil
+        return out
+    }
+
+    /// "09:12" in the user's time zone from an audit `ts`. Pure.
+    nonisolated static func localTime(fromISO ts: String) -> String {
+        let f = ISO8601DateFormatter(); f.formatOptions = [.withInternetDateTime]
+        guard let d = f.date(from: ts) else { return String(ts.dropFirst(11).prefix(5)) }
+        return d.formatted(date: .omitted, time: .shortened)
     }
 
     /// The most recent `limit` raw JSONL lines (newest last).

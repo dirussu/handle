@@ -40,13 +40,17 @@ nonisolated struct AIMessage: Sendable {
 }
 
 /// A tool the model may call. `inputSchema` is a JSON Schema object.
+/// `strict` asks the provider to validate arguments against the schema exactly
+/// (only for schemas we wrote); `serverType` marks a provider-hosted tool.
 nonisolated struct AIToolSpec: @unchecked Sendable {
     var name: String
     var description: String
     var inputSchema: [String: Any]
+    var strict: Bool = false
+    var serverType: String? = nil
 }
 
-nonisolated enum AIEffort: String, Sendable { case low, medium, high }
+nonisolated enum AIEffort: String, Codable, Sendable { case low, medium, high }
 
 nonisolated struct AIRequest: Sendable {
     var messages: [AIMessage]

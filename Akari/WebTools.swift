@@ -32,7 +32,8 @@ enum WebTools {
         let mime = (response.mimeType ?? "").lowercased()
         let text: String
         if mime.contains("html") || mime.isEmpty {
-            text = textFromHTML(String(decoding: body, as: UTF8.self))
+            let raw = String(decoding: body, as: UTF8.self)
+            text = await Task.detached(priority: .userInitiated) { textFromHTML(raw) }.value   // regex passes off the main actor
         } else if mime.hasPrefix("text/") || mime.contains("json") || mime.contains("xml") {
             text = String(decoding: body, as: UTF8.self)
         } else {
@@ -51,23 +52,26 @@ enum WebTools {
             return re.stringByReplacingMatches(in: s, range: NSRange(s.startIndex..., in: s), withTemplate: repl)
         }
         var title = ""
-        if let re = try? NSRegularExpression(pattern: "<title[^>]*>(.*?)</title>", options: [.caseInsensitive, .dotMatchesLineSeparators]),
-           let m = re.firstMatch(in: html, range: NSRange(html.startIndex..., in: html)), let r = Range(m.range(at: 1), in: html) {
-            title = String(html[r]).trimmingCharacters(in: .whitespacesAndNewlines)
-            for (k, v) in ["&amp;": "&", "&lt;": "<", "&gt;": ">", "&quot;": "\"", "&#39;": "'", "&nbsp;": " "] { title = title.replacingOccurrences(of: k, with: v) }
+        if let m = titleRegex.firstMatch(in: html, range: NSRange(html.startIndex..., in: html)), let r = Range(m.range(at: 1), in: html) {
+            title = decodeEntities(String(html[r]).trimmingCharacters(in: .whitespacesAndNewlines))
         }
         var s = html
         s = replace("<(script|style|noscript|svg|head)[^>]*>.*?</\\1>", with: " ", in: s)
         s = replace("<!--.*?-->", with: " ", in: s)
         s = replace("<br\\s*/?>|</(p|div|li|tr|h[1-6]|section|article|header|footer|blockquote|pre|table)>", with: "\n", in: s)
         s = replace("<[^>]+>", with: " ", in: s)
-        let entities = ["&amp;": "&", "&lt;": "<", "&gt;": ">", "&quot;": "\"", "&#39;": "'", "&apos;": "'", "&nbsp;": " ", "&#160;": " "]
-        for (k, v) in entities { s = s.replacingOccurrences(of: k, with: v) }
+        s = decodeEntities(s)
         s = replace("[ \\t\\r\\f]+", with: " ", in: s)
         s = replace(" *\\n *", with: "\n", in: s)
         s = replace("\\n{3,}", with: "\n\n", in: s)
         let body = s.trimmingCharacters(in: .whitespacesAndNewlines)
         return title.isEmpty ? body : "Title: \(title)\n\n\(body)"
+    }
+
+    nonisolated private static let titleRegex = try! NSRegularExpression(pattern: "<title[^>]*>(.*?)</title>", options: [.caseInsensitive, .dotMatchesLineSeparators])
+    nonisolated private static let entities: [(String, String)] = [("&amp;", "&"), ("&lt;", "<"), ("&gt;", ">"), ("&quot;", "\""), ("&#39;", "'"), ("&apos;", "'"), ("&nbsp;", " "), ("&#160;", " ")]
+    nonisolated static func decodeEntities(_ s: String) -> String {
+        entities.reduce(s) { $0.replacingOccurrences(of: $1.0, with: $1.1) }
     }
 }
 
@@ -92,5 +96,5 @@ nonisolated enum WebSettings {
     }
     /// The Anthropic server tool, as a spec the adapter recognises by `__server_type`.
     static let anthropicSearchSpec = AIToolSpec(name: "web_search", description: "Search the web (server-side).",
-                                                inputSchema: ["__server_type": "web_search_20260209", "max_uses": 5])
+                                                inputSchema: ["max_uses": 5], serverType: "web_search_20260209")
 }

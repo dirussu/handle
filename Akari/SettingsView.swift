@@ -92,6 +92,8 @@ struct SettingsBody: View {
             WorkspaceSection()
             PermissionsSection()
             StorageSection()
+            CustomizeSection()
+            ToolTrustSection()
             PowerUserSection()
             IntegrationsSection()   // advanced territory (founder call) — lives with Power User
             AboutSection()
@@ -461,7 +463,7 @@ private struct AutomationsSection: View {
                             Text(a.name).font(.body)
                             Text(a.schedule?.describe ?? a.trigger?.describe ?? "manual only").font(.caption).foregroundStyle(.secondary)
                             if a.routineGoal != nil {
-                                Text(((a.policy?.standingConsent ?? false) ? "May act without asking" : "Read-only") + (lastRuns[a.id].map { " · last run \($0)" } ?? ""))
+                                Text(((a.policy?.standingConsent ?? false) ? "May act without asking" : "Read-only") + " · up to \(AICost.format((a.policy ?? AgentPolicy()).budgetUSD)) / \((a.policy ?? AgentPolicy()).maxSteps) steps per run" + (lastRuns[a.id].map { " · last run \($0)" } ?? ""))
                                     .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                             }
                         }
@@ -521,12 +523,13 @@ private struct AutomationsSection: View {
     @State private var lastRuns: [String: String] = [:]
 
     private func loadLastRuns() async {
+        let routines = automations.filter { $0.routineGoal != nil }
+        let found = await AuditLog.shared.lastRuns(for: Set(routines.map { "routine:\($0.name)" }))
         var out: [String: String] = [:]
-        for a in automations where a.routineGoal != nil {
-            if let r = await AuditLog.shared.lastRun(for: "routine:\(a.name)") {
-                let time = String(r.ts.dropFirst(11).prefix(5))
-                out[a.id] = "\(time) · \(r.outcome)" + (r.summary.hasPrefix("$") ? " · " + r.summary.split(separator: "·").first!.trimmingCharacters(in: .whitespaces) : "")
-            }
+        for a in routines {
+            guard let r = found["routine:\(a.name)"] else { continue }
+            let cost = r.summary.hasPrefix("$") ? " · " + (r.summary.split(separator: "·").first.map { $0.trimmingCharacters(in: .whitespaces) } ?? "") : ""
+            out[a.id] = "\(AuditLog.localTime(fromISO: r.ts)) · \(r.outcome)\(cost)"
         }
         lastRuns = out
     }
@@ -690,6 +693,9 @@ private struct AutomationEditor: View {
     @State private var app: String
     @State private var ssid: String
     @State private var paramsText: String
+    @State private var goal: String
+    @State private var budget: Double
+    @State private var steps: Int
     @State private var error: String?
 
     init(original: Automation, onSave: @escaping (Automation) -> Void, onCancel: @escaping () -> Void) {
@@ -708,6 +714,10 @@ private struct AutomationEditor: View {
             .flatMap { try? JSONSerialization.data(withJSONObject: $0, options: [.sortedKeys]) }
             .flatMap { String(data: $0, encoding: .utf8) }
         _paramsText = State(initialValue: pretty ?? original.paramsJSON)
+        _goal = State(initialValue: original.routineGoal ?? "")
+        let policy = original.policy ?? AgentPolicy()
+        _budget = State(initialValue: policy.budgetUSD)
+        _steps = State(initialValue: policy.maxSteps)
     }
 
     var body: some View {
@@ -742,10 +752,26 @@ private struct AutomationEditor: View {
                 }
             }
 
-            TextField("Recipe params (JSON)", text: $paramsText, axis: .vertical)
-                .textFieldStyle(.roundedBorder)
-                .font(.system(size: 11, design: .monospaced))
-                .lineLimit(1...4)
+            if original.routineGoal != nil {
+                TextField("What to do each run", text: $goal, axis: .vertical)
+                    .textFieldStyle(.roundedBorder)
+                    .lineLimit(1...4)
+                HStack(spacing: 12) {
+                    HStack(spacing: 4) {
+                        Text("Budget per run $").font(.caption).foregroundStyle(.secondary)
+                        TextField("", value: $budget, format: .number.precision(.fractionLength(2)))
+                            .textFieldStyle(.roundedBorder).frame(width: 56)
+                    }
+                    Stepper("Max steps: \(steps)", value: $steps, in: 1...50).font(.caption)
+                    Spacer()
+                }
+                Text("0 = no budget. Each run stops at whichever limit comes first.").font(.caption).foregroundStyle(.secondary)
+            } else {
+                TextField("Recipe params (JSON)", text: $paramsText, axis: .vertical)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 11, design: .monospaced))
+                    .lineLimit(1...4)
+            }
 
             if let error {
                 Text(error).font(.caption).foregroundStyle(.red)
@@ -797,6 +823,18 @@ private struct AutomationEditor: View {
             updated.trigger = trigger
         }
 
+        if original.routineGoal != nil {
+            let g = goal.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !g.isEmpty else { error = "The routine needs a goal."; return }
+            updated.routineGoal = g
+            var p = updated.policy ?? AgentPolicy()
+            p.budgetUSD = max(0, budget)
+            p.maxSteps = max(1, min(50, steps))
+            updated.policy = p
+            error = nil
+            onSave(updated)
+            return
+        }
         guard let d = paramsText.data(using: .utf8),
               let obj = try? JSONSerialization.jsonObject(with: d), obj is [String: Any],
               let compact = try? JSONSerialization.data(withJSONObject: obj),
@@ -1067,6 +1105,145 @@ private struct PowerUserSection: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
+    }
+}
+
+/// DEBUG harness only (`__uishot__`): the two customization sections on their own.
+struct SettingsCustomizePreview: View {
+    var body: some View {
+        Form { CustomizeSection(); ToolTrustSection() }.formStyle(.grouped)
+    }
+}
+
+/// CUSTOMIZE — the user's standing instructions and their own tools (CUSTOMIZING.md).
+private struct CustomizeSection: View {
+    @State private var instructions: String = UserInstructions.text
+    @State private var defs: [UserToolDef] = []
+    @State private var errors: [UserTools.LoadError] = []
+    @State private var note: String?
+
+    var body: some View {
+        Section {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Instructions").font(.subheadline.weight(.medium))
+                TextEditor(text: $instructions)
+                    .font(.system(size: 12))
+                    .frame(minHeight: 72, maxHeight: 140)
+                    .scrollContentBackground(.hidden)
+                    .padding(6)
+                    .background(RoundedRectangle(cornerRadius: 6).fill(Color(nsColor: .textBackgroundColor)))
+                    .onChange(of: instructions) { _, v in UserInstructions.save(v) }
+                Text("Sent with every request, like a note pinned to your message — how to address you, what to prefer, what never to do. \(instructions.count)/\(UserInstructions.maxChars)")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Your tools").font(.subheadline.weight(.medium))
+                if defs.isEmpty && errors.isEmpty {
+                    Text("None yet. A tool is one JSON file: a name, a description, its parameters, and the shell command, AppleScript or Shortcut that runs when the model calls it.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                ForEach(defs, id: \.name) { d in
+                    HStack(spacing: 8) {
+                        Image(systemName: d.runner == "shell" ? "terminal" : (d.runner == "shortcut" ? "square.2.layers.3d" : "applescript"))
+                            .font(.system(size: 12)).foregroundStyle(.secondary).frame(width: 16)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(d.name).font(.system(size: 12, design: .monospaced))
+                            Text(d.description).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                        Spacer()
+                        Text((d.confirm ?? true) ? "asks first" : "runs without asking").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                ForEach(errors) { e in
+                    Text("\(e.file): \(e.reason)").font(.caption).foregroundStyle(.red)
+                }
+                HStack(spacing: 10) {
+                    Button("Open tools folder") { openFolder() }.buttonStyle(.akariSolid)
+                    Button("Add example tools") { addExamples() }
+                        .buttonStyle(.borderless).akariIconHover(idle: Color(nsColor: .secondaryLabelColor))
+                    Button("Reload") { reload() }
+                        .buttonStyle(.borderless).akariIconHover(idle: Color(nsColor: .secondaryLabelColor))
+                    Spacer()
+                }
+                if let note { Text(note).font(.caption).foregroundStyle(.secondary) }
+            }
+        } header: {
+            SettingsHeader(icon: "slider.horizontal.3", title: "Customize")
+        } footer: {
+            Text("Tools live in ~/Library/Application Support/Akari/tools, one JSON file each, and are picked up the moment a file is saved. The format is in CUSTOMIZING.md.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        .onAppear { reload() }
+    }
+
+    private func reload() {
+        UserTools.invalidate()
+        defs = UserTools.definitions
+        errors = UserTools.errors
+    }
+
+    private func openFolder() {
+        try? FileManager.default.createDirectory(at: UserTools.folderURL, withIntermediateDirectories: true)
+        NSWorkspace.shared.open(UserTools.folderURL)
+    }
+
+    private func addExamples() {
+        do {
+            let written = try UserTools.writeExamples()
+            note = written.isEmpty ? "The example files are already there." : "Added \(written.map(\.lastPathComponent).joined(separator: ", "))."
+        } catch {
+            note = "Couldn't write the examples: \(error.localizedDescription)"
+        }
+        reload()
+    }
+}
+
+/// TOOLS — per-tool trust: on/off, and "don't ask" for the ones that normally show a card.
+private struct ToolTrustSection: View {
+    @State private var expanded = false
+    @State private var disabled: Set<String> = TrustSettings.disabledTools
+    @State private var dontAsk: Set<String> = TrustSettings.dontAsk
+
+    private var rows: [Tool] { ToolRegistry.builtinTools + AgentTools.tools + UserTools.tools }
+
+    var body: some View {
+        Section {
+            DisclosureGroup(isExpanded: $expanded) {
+                ForEach(rows, id: \.name) { t in
+                    HStack(spacing: 8) {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(t.name).font(.system(size: 12, design: .monospaced))
+                            Text(t.description.split(separator: "\n").first.map(String.init) ?? t.description)
+                                .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                        Spacer()
+                        if t.confirmation == .confirm && !TrustSettings.alwaysAsk.contains(t.name) {
+                            Toggle("Don't ask", isOn: dontAskBinding(t.name)).controlSize(.mini).font(.caption)
+                                .help("Runs without a card while you're at the notch. Unattended runs still follow the automation's consent.")
+                        }
+                        Toggle("", isOn: enabledBinding(t.name)).labelsHidden().controlSize(.mini)
+                            .help("Off: the model can't see this tool.")
+                    }
+                }
+            } label: {
+                Text("\(rows.count) tools · \(disabled.count) off · \(dontAsk.count) without a card")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        } header: {
+            SettingsHeader(icon: "checklist", title: "Tools")
+        } footer: {
+            Text("Off: the model can't see the tool. Don't ask: it runs without a card while you're at the notch; automations and background tasks still follow their own consent.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    private func enabledBinding(_ name: String) -> Binding<Bool> {
+        Binding(get: { !disabled.contains(name) },
+                set: { on in TrustSettings.setDisabled(name, !on); disabled = TrustSettings.disabledTools })
+    }
+    private func dontAskBinding(_ name: String) -> Binding<Bool> {
+        Binding(get: { dontAsk.contains(name) },
+                set: { on in TrustSettings.setDontAsk(name, on); dontAsk = TrustSettings.dontAsk })
     }
 }
 

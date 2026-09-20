@@ -935,8 +935,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // matching recipes are listed for `run_recipe`, and the configured MCP tools
         // are native tools, so the model can plan across all of them.
 
-        await runAgentLoop(in: conversation, goal: userText, policy: .interactive(), headless: false)
+        _ = await runAgentLoop(in: conversation, goal: userText, policy: .interactive(), headless: false)
     }
+
+    /// Automations currently executing (re-entrancy guard for run_automation).
+    private var runningAutomationIDs: Set<String> = []
+
+    /// Result slot for a ledger-tracked run (the ledger holds `Task<Void, Never>` handles).
+    private final class AgentRunBox { var run: AgentRun? }
 
     /// What a headless run tells the model when a tool needs consent it doesn't have.
     static let refusedNote = "Not run: this action needs the user's OK, and this run has no standing consent. Say so in your answer instead of trying another way to do it."
@@ -947,7 +953,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// either have standing consent or refuse consequential tools and say so.
     /// Returns the final answer (also committed to the conversation).
     @discardableResult
-    private func runAgentLoop(in conversation: Conversation, goal userText: String, policy: AgentPolicy, headless: Bool) async -> String {
+    private func runAgentLoop(in conversation: Conversation, goal userText: String, policy: AgentPolicy, headless: Bool,
+                              inheritedMCP: (tools: [Tool], map: [String: MCPToolInfo])? = nil) async -> AgentRun {
         // 2. Action loop — native tool_use/tool_result blocks (`loopHistory`) when the
         // provider has tools, prompt-folded JSON (`pendingResult`) otherwise. EVERY
         // call the model makes in a step runs and all results go back together; the
@@ -955,17 +962,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // (ASSISTANT.md phase 1: the 4B-era leash — 5 steps, one action per turn,
         // first call only — is gone; limits are visible budgets instead).
         let native = AIConfig.nativeTools
-        let (mcpTools, mcpMap) = MCPLoopTools.make(await MCPService.shared.allConfiguredTools())
-        let toolset = (ToolRegistry.all + mcpTools + [Self.runRecipeTool] + AgentTools.tools).filter { policy.allows($0.name) }
+        // MCP discovery once per user turn; children inherit it (no re-spawn per sub-agent).
+        let (mcpTools, mcpMap): ([Tool], [String: MCPToolInfo])
+        if let inheritedMCP { (mcpTools, mcpMap) = inheritedMCP } else { (mcpTools, mcpMap) = MCPLoopTools.make(await MCPService.shared.allConfiguredTools()) }
+        // Unattended without standing consent = read-only: consequential tools and the
+        // side-effecting `.auto` ones are not even offered (nothing to refuse, no wasted
+        // steps, a much smaller prompt).
+        let unattendedReadOnly = headless && !policy.standingConsent
+        let toolset = (ToolRegistry.all + mcpTools + [Self.runRecipeTool] + AgentTools.tools).filter { t in
+            policy.allows(t.name) && !TrustSettings.isDisabled(t.name)
+                && !(unattendedReadOnly && (t.confirmation == .confirm || ScreenTools.sideEffectingAutoTools.contains(t.name)))
+        }
         let webSpecs: [AIToolSpec] = (AIConfig.provider == .anthropic && WebSettings.searchEnabled) ? [WebSettings.anthropicSearchSpec] : []
-        let recipeLines = Self.recipeCandidatesLine(for: userText)
+        let recipeLines = unattendedReadOnly ? "" : Self.recipeCandidatesLine(for: userText)
         let maxSteps = policy.maxSteps
         let budgetUSD = policy.budgetUSD
         var spentUSD = 0.0
         // Native: the system prompt (identity + rules + tool schemas) is byte-stable
         // across steps AND turns so it caches; anything that changes per turn — the
         // clock — rides in the user prefix, identical at every step of this loop.
-        let turnPrefix = [native ? Self.currentTimeLine() : "", recipeLines].filter { !$0.isEmpty }.joined(separator: "\n\n")
+        var offered = Set(toolset.map(\.name))   // + the loop's own screenshot tool (pixels leave: not for unattended read-only runs)
+        if !unattendedReadOnly && AIConfig.visionAvailable { offered.insert("recapture_screen") }
+        let readOnlyLine = unattendedReadOnly
+            ? "This run is unattended and read-only: only the tools in your tool list exist for it. Tools the guide mentions but the list doesn't (writing, shell, scripts, drafts, clicks) are unavailable — don't call them; say what you couldn't do."
+            : ""
+        let turnPrefix = [native ? Self.currentTimeLine() : "", readOnlyLine, recipeLines].filter { !$0.isEmpty }.joined(separator: "\n\n")
         defer { if native { conversation.pendingMemory = ""; conversation.pendingContextPreamble = "" } }
         var loopHistory: [AIMessage] = []   // native: [assistant tool_use(s), user tool_result(s)] per step
         var pendingResult = ""             // folded: the last step's results, prefixed to the next prompt
@@ -980,6 +1001,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if headless {
                 if policy.standingConsent { agentLog.info("consent: standing — \(label, privacy: .public)"); return .approved }
                 agentLog.info("consent: refused (headless, no standing consent) — \(label, privacy: .public)"); return .refused
+            }
+            if TrustSettings.isTrusted(label) {   // Settings → Tools → "Don't ask" (attended runs only)
+                agentLog.info("consent: trusted, no card — \(label, privacy: .public)"); return .approved
             }
             return await awaitConfirmation(in: conversation, title: title, rows: rows, label: label, destructive: destructive) ? .approved : .declined
         }
@@ -999,24 +1023,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         /// One more model turn with NO tools — ends the loop with a plain-text answer.
-        func forceFinalAnswer(_ note: String) async -> String {
+        func forceFinalAnswer(_ note: String) async -> AgentRun {
+            let out: TurnOutput
             if native {
-                return (await streamTurn(in: conversation, rules: actionToolInstruction(native: true), instr: turnPrefix,
-                                         loopHistory: loopHistory + [AIMessage.user(note)])).text
+                out = await streamTurn(in: conversation, rules: actionToolInstruction(native: true), instr: turnPrefix,
+                                       loopHistory: loopHistory + [AIMessage.user(note)], effort: policy.effort)
             } else {
-                return await streamOneTurn(in: conversation, instr: pendingResult.isEmpty ? note : pendingResult + "\n\n" + note)
+                out = await streamTurn(in: conversation, instr: [turnPrefix, pendingResult, note].filter { !$0.isEmpty }.joined(separator: "\n\n"), effort: policy.effort)
             }
+            spend(out)
+            return done(out.text, cancelled: Task.isCancelled)
         }
-        /// Add the last request's cost to this turn's tally (0 for unpriced models).
-        func spend() {
-            guard let u = CloudEngine.shared.lastTurnUsage else { return }
+        /// Add a request's own cost to this run's tally (0 for unpriced models; nothing when no request was made).
+        func spend(_ out: TurnOutput) {
+            guard let u = out.usage else { return }
             spentUSD += AICost.estimate(model: CloudEngine.shared.lastModel, input: u.input, output: u.output, cacheRead: u.cacheRead, cacheWrite: u.cacheWrite) ?? 0
-            conversation.lastRunCostUSD = spentUSD
         }
+        /// Every exit goes through here so the result carries the cost.
+        func done(_ text: String, cancelled: Bool = false) -> AgentRun { AgentRun(text: text, costUSD: spentUSD, cancelled: cancelled) }
+        /// Audit label for a tool run inside this run ("routine:Morning › run_shell").
+        func auditName(_ tool: String) -> String { policy.label.map { "\($0) › \(tool)" } ?? tool }
 
-        var step = 0
-        while true {
-            if Task.isCancelled { return "" }
+        for step in 0... {
+            if Task.isCancelled { return done("", cancelled: true) }
             if let why = AgentSettings.stopReason(step: step, maxSteps: maxSteps, spentUSD: spentUSD, budgetUSD: budgetUSD) {
                 agentLog.info("runToolLoop: \(why, privacy: .public) after \(step) step(s), \(AICost.format(spentUSD), privacy: .public) — forcing final answer")
                 return await forceFinalAnswer("[\(why). Give your final answer now in plain text, no tools — say what is done and what is not.]")
@@ -1024,25 +1053,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let out: TurnOutput
             if native {
                 out = await streamTurn(in: conversation, rules: actionToolInstruction(native: true), instr: turnPrefix, display: false,
-                                       tools: toolset, extraSpecs: webSpecs, loopHistory: loopHistory, consumeSlots: false)
+                                       tools: toolset, extraSpecs: webSpecs, loopHistory: loopHistory, consumeSlots: false, effort: policy.effort)
             } else {
-                let instr = [actionToolInstruction(), pendingResult].filter { !$0.isEmpty }.joined(separator: "\n\n")
+                let instr = [turnPrefix, actionToolInstruction(), pendingResult].filter { !$0.isEmpty }.joined(separator: "\n\n")
                 pendingResult = ""
-                out = await streamTurn(in: conversation, instr: instr, display: false, tools: toolset)
+                out = await streamTurn(in: conversation, instr: instr, display: false, tools: toolset, effort: policy.effort)
             }
-            spend()
+            spend(out)
             let calls = out.calls
             guard !calls.isEmpty else {            // no tool call → final answer
-                if out.text.isEmpty && !retriedEmptyReply {
-                    // A reply with no text and no call — typically the output budget
-                    // went to reasoning (stop=max_tokens). Ask once, plainly.
+                if out.text.isEmpty && out.stopReason == "max_tokens" && !retriedEmptyReply {
+                    // The output budget went to reasoning before any text. Ask once, plainly.
                     retriedEmptyReply = true
-                    agentLog.info("runToolLoop: empty reply — asking once for a plain-text answer")
-                    return await forceFinalAnswer("[Your previous reply came back empty — it was cut off before any text. Answer now in plain text, concisely.]")
+                    agentLog.info("runToolLoop: reply cut off (max_tokens) with no text — asking once for a plain-text answer")
+                    return await forceFinalAnswer("[Your previous reply was cut off before any text. Answer now in plain text, concisely.]")
                 }
                 let finalText = out.text.isEmpty ? lastToolSummary : out.text
                 conversation.commitAssistantMessage(finalText)
-                return finalText
+                return done(finalText)
             }
             agentLog.info("runToolLoop: step \(step) → \(calls.count) call(s): \(calls.map { "\($0.name)\($0.args.isEmpty ? "" : String(describing: $0.args))" }.joined(separator: " | "), privacy: .public)")
             if native {   // the model's own call(s) go on the record before their results
@@ -1062,19 +1090,54 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 feedback(calls.map { StepResult(call: $0, content: "(not run again — identical to the previous call; its result is above)", isError: false, image: nil) })
                 return await forceFinalAnswer("[You have made the same call three times. Do not call any tool again — give your final answer now in plain text, saying what is done and what is not.]")
             }
+            // Unattended with standing consent there is no card to catch a repeated
+            // consequential action — an identical step is not run a second time.
+            if seen == 2 && headless && calls.contains(where: { c in (ToolRegistry.tool(named: c.name)?.confirmation == .confirm) || mcpMap[c.name] != nil || ["run_recipe", "click_element", "save_automation", "run_automation", "delete_automation"].contains(c.name) }) {
+                agentLog.info("runToolLoop: repeated consequential step in an unattended run — not run again")
+                feedback(calls.map { StepResult(call: $0, content: "Not run again: this is identical to the previous step, whose result is above. If it is done, say so.", isError: false, image: nil) })
+                continue
+            }
 
             var results: [StepResult] = []
             var declined = false
             for call in calls {
-                if Task.isCancelled { return "" }
+                if Task.isCancelled { return done("", cancelled: true) }
                 if declined {   // every call in the step still needs a result
                     results.append(StepResult(call: call, content: "Skipped — the user declined the previous action.", isError: true, image: nil))
                     continue
                 }
+                // A name that isn't in this run's tool list (the prose guide names tools the
+                // list may not carry): answer at once instead of walking the consent paths.
+                if !offered.contains(call.name) {
+                    results.append(StepResult(call: call, content: "Not available in this run: \(call.name). Use only the tools in your tool list.", isError: true, image: nil))
+                    continue
+                }
                 switch call.name {
                 case "recapture_screen":
+                    if !AIConfig.visionAvailable {
+                        results.append(StepResult(call: call, content: SeeSettings.unsupportedNote, isError: false, image: nil)); continue
+                    }
                     if let cap = await captureCurrentScreen(into: conversation) {
-                        results.append(StepResult(call: call, content: "Re-captured the current screen (\(Int(cap.pixelSize.width))×\(Int(cap.pixelSize.height)) px) — the screenshot is attached, and the on-screen element list is refreshed.", isError: false, image: AIImage.jpegData(cap.image)))
+                        // Pixels leave here too — the same consent as the user-message screenshot.
+                        var allowed = true
+                        if headless {
+                            allowed = policy.standingConsent
+                        } else if SeeSettings.askBeforeSend {
+                            if conversation.screenSendDecision == nil {
+                                conversation.screenSendDecision = await awaitConfirmation(in: conversation, title: "Send a screenshot?",
+                                    rows: [("Of", conversation.capturedAppName ?? "the screen"), ("To", AIConfig.providerDisplayName)], label: "send_screenshot")
+                                if Task.isCancelled { return done("", cancelled: true) }
+                            }
+                            allowed = conversation.screenSendDecision == true
+                        }
+                        if allowed {
+                            conversation.markScreenshot(.sent(provider: AIConfig.provider?.shortName ?? "the provider"))
+                            NotchController.shared.flashSeeing()
+                            results.append(StepResult(call: call, content: "Re-captured the current screen (\(Int(cap.pixelSize.width))×\(Int(cap.pixelSize.height)) px) — the screenshot is attached, and the on-screen element list is refreshed.", isError: false, image: AIImage.jpegData(cap.image)))
+                        } else {
+                            conversation.markScreenshot(.withheldDeclined)
+                            results.append(StepResult(call: call, content: headless ? Self.refusedNote : SeeSettings.declinedNote + " The on-screen element list was refreshed; read_window still works.", isError: false, image: nil))
+                        }
                     } else if let withheld = conversation.takeCaptureWithheld(), case .withheldExcluded(let app) = withheld {
                         results.append(StepResult(call: call, content: "Not captured: \(app) is on the user's excluded-apps list. Say so if the answer needs the screen.", isError: false, image: nil))
                     } else {
@@ -1090,7 +1153,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     case .outOfRange:
                         results.append(StepResult(call: call, content: "Index \(idx) is out of range (\(conversation.axElements.count) elements known). Call read_window first, then use one of its numbers.", isError: true, image: nil))
                     case .cancelled:
-                        return ""
+                        return done("", cancelled: true)
                     case .declined:
                         declined = true; lastToolSummary = "Okay — I won't click it."
                         results.append(StepResult(call: call, content: "The user declined the click.", isError: false, image: nil))
@@ -1108,14 +1171,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     let sched = (call.args["schedule"] as? [String: Any]).flatMap { Self.scheduleFrom($0.merging(["task": goal]) { a, _ in a }) }?.schedule
                     let trig = (call.args["trigger"] as? [String: Any]).flatMap { Self.triggerFrom($0.merging(["task": goal]) { a, _ in a }) }?.trigger
                     guard sched != nil || trig != nil else { results.append(StepResult(call: call, content: "save_automation needs a schedule or a trigger.", isError: true, image: nil)); continue }
-                    let consent = (call.args["standing_consent"] as? Bool) ?? false
+                    // Standing consent is a human decision on a card — an unattended run
+                    // (even one that has consent itself) can only create read-only automations.
+                    let consent = headless ? false : ((call.args["standing_consent"] as? Bool) ?? false)
                     let name = (call.args["name"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? Automation.routineName(goal)
                     let when = [sched?.describe, trig?.describe].compactMap { $0 }.joined(separator: " and ")
                     let approval = await approve(title: "Save automation?",
                                                  rows: [("Name", name), ("When", when), ("Does", goal),
                                                         ("May act without asking", consent ? "Yes — standing consent" : "No — read-only; it says when something needs your OK")],
                                                  label: "save-automation")
-                    if Task.isCancelled { return "" }
+                    if Task.isCancelled { return done("", cancelled: true) }
                     switch approval {
                     case .refused: results.append(StepResult(call: call, content: Self.refusedNote, isError: false, image: nil))
                     case .declined: declined = true; lastToolSummary = "Okay, I didn't save it."; results.append(StepResult(call: call, content: "The user declined.", isError: false, image: nil))
@@ -1134,9 +1199,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         results.append(StepResult(call: call, content: "No automation with id or name \"\(id)\". Call list_automations.", isError: true, image: nil)); continue
                     }
                     let isDelete = call.name == "delete_automation"
+                    if !isDelete && (policy.depth >= 2 || runningAutomationIDs.contains(a.id)) {
+                        results.append(StepResult(call: call, content: "Not run: “\(a.name)” is already running or this run is nested too deep.", isError: true, image: nil)); continue
+                    }
                     let approval = await approve(title: isDelete ? "Delete automation?" : "Run automation now?",
                                                  rows: [("Name", a.name), ("Does", a.routineGoal ?? "recipe \(a.recipeId)")], label: call.name, destructive: isDelete)
-                    if Task.isCancelled { return "" }
+                    if Task.isCancelled { return done("", cancelled: true) }
                     switch approval {
                     case .refused: results.append(StepResult(call: call, content: Self.refusedNote, isError: false, image: nil))
                     case .declined: declined = true; lastToolSummary = "Okay, I've left it alone."; results.append(StepResult(call: call, content: "The user declined.", isError: false, image: nil))
@@ -1147,7 +1215,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                             lastToolSummary = "Deleted “\(a.name)”."
                             results.append(StepResult(call: call, content: "Deleted automation “\(a.name)”.", isError: false, image: nil))
                         } else {
-                            await runAutomation(a)
+                            await runAutomation(a, depth: policy.depth + 1)
                             lastToolSummary = "Ran “\(a.name)”."
                             results.append(StepResult(call: call, content: "Ran “\(a.name)” — its result was delivered under the notch and audited.", isError: false, image: nil))
                         }
@@ -1161,16 +1229,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     let approval = await approve(title: "Start a sub-agent?",
                                                  rows: [("Goal", goal), ("Tools", allowed?.joined(separator: ", ") ?? "read-only tools"), ("Steps", "up to \(min(steps, 15))")],
                                                  label: "run_subagent")
-                    if Task.isCancelled { return "" }
+                    if Task.isCancelled { return done("", cancelled: true) }
                     switch approval {
                     case .refused: results.append(StepResult(call: call, content: Self.refusedNote, isError: false, image: nil))
                     case .declined: declined = true; lastToolSummary = "Okay."; results.append(StepResult(call: call, content: "The user declined.", isError: false, image: nil))
                     case .approved:
-                        let child = policy.child(allowedTools: allowed, maxSteps: steps)
+                        let child = policy.child(allowedTools: allowed, maxSteps: steps, label: (policy.label ?? "turn") + "/subagent")
                         let convo = Conversation(chatWithApp: "")
                         convo.addUserMessage(goal)
                         agentLog.info("subagent: start depth=\(child.depth) steps=\(child.maxSteps) goal=\"\(goal.prefix(80), privacy: .public)\"")
-                        let answer = await runAgentLoop(in: convo, goal: goal, policy: child, headless: true)
+                        let run = await runAgentLoop(in: convo, goal: goal, policy: child, headless: true, inheritedMCP: (mcpTools, mcpMap))
+                        spentUSD += run.costUSD   // the child's spend counts against this turn's budget
+                        let answer = run.text
                         agentLog.info("subagent: done — \(answer.prefix(120), privacy: .public)")
                         conversation.addToolChip(name: "run_subagent", inputJSON: call.argsJSON, content: answer, isError: answer.isEmpty, displaySummary: "Sub-agent finished")
                         lastToolSummary = answer
@@ -1180,22 +1250,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     let goal = (call.args["goal"] as? String) ?? ""
                     guard !goal.isEmpty else { results.append(StepResult(call: call, content: "run_in_background needs a goal.", isError: true, image: nil)); continue }
                     let approval = await approve(title: "Run in the background?", rows: [("Goal", goal), ("Note", "Read-only; the result appears under the notch when it's done.")], label: "run_in_background")
-                    if Task.isCancelled { return "" }
+                    if Task.isCancelled { return done("", cancelled: true) }
                     switch approval {
                     case .refused: results.append(StepResult(call: call, content: Self.refusedNote, isError: false, image: nil))
                     case .declined: declined = true; lastToolSummary = "Okay."; results.append(StepResult(call: call, content: "The user declined.", isError: false, image: nil))
                     case .approved:
                         let id = TaskLedger.shared.start(goal: goal)
-                        let bg = policy.child(allowedTools: nil, maxSteps: 20)
+                        let bg = policy.child(allowedTools: nil, maxSteps: 15, label: "task:\(id)")
+                        let mcp = (mcpTools, mcpMap)
+                        Task { await AuditLog.shared.record(tool: "task:\(id)", argsJSON: call.argsJSON, outcome: "started", summary: String(goal.prefix(80)), confirmed: !headless) }
                         let handle = Task { @MainActor [weak self] in
                             guard let self else { return }
                             let convo = Conversation(chatWithApp: "")
                             convo.addUserMessage(goal + "\n\n(Deliver the result short and glanceable — it appears under the notch.)")
-                            let answer = await self.runAgentLoop(in: convo, goal: goal, policy: bg, headless: true)
-                            if Task.isCancelled { return }
-                            TaskLedger.shared.finish(id: id, result: answer, costUSD: convo.lastRunCostUSD)
-                            NotchController.shared.notifyResult(answer.isEmpty ? "Background task finished with no result." : answer)
-                            agentLog.info("background \(id, privacy: .public): done — \(answer.prefix(100), privacy: .public)")
+                            let run = await self.runAgentLoop(in: convo, goal: goal, policy: bg, headless: true, inheritedMCP: mcp)
+                            if run.cancelled || Task.isCancelled { return }
+                            TaskLedger.shared.finish(id: id, result: run.text, costUSD: run.costUSD)
+                            await AuditLog.shared.record(tool: "task:\(id)", argsJSON: "{}", outcome: run.text.isEmpty ? "error" : "ok", summary: "\(AICost.format(run.costUSD)) · \(run.text.prefix(80))", confirmed: false)
+                            NotchController.shared.notifyResult(run.text.isEmpty ? "Background task finished with no result." : run.text)
+                            agentLog.info("background \(id, privacy: .public): done — \(run.text.prefix(100), privacy: .public)")
                         }
                         TaskLedger.shared.attach(id: id, task: handle)
                         conversation.addToolChip(name: "run_in_background", inputJSON: call.argsJSON, content: "Started task \(id)", isError: false, displaySummary: "Running in background")
@@ -1206,8 +1279,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     let id = (call.args["id"] as? String) ?? ""
                     let params = (call.args["params"] as? [String: Any]) ?? [:]
                     if headless && !policy.standingConsent { results.append(StepResult(call: call, content: Self.refusedNote, isError: false, image: nil)); continue }
-                    let r = await performRecipe(id: id, params: params, conversation: conversation, autoApprove: headless)
-                    if Task.isCancelled { return "" }
+                    let r = await performRecipe(id: id, params: params, conversation: conversation, autoApprove: headless, auditLabel: policy.label)
+                    if Task.isCancelled { return done("", cancelled: true) }
                     if r.declined { declined = true; lastToolSummary = "Okay, I've left that alone." } else if !r.isError { lastToolSummary = r.content }
                     results.append(StepResult(call: call, content: r.content, isError: r.isError, image: nil))
                 default:
@@ -1216,7 +1289,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         let argsJSON = call.argsJSON
                         let approval = await approve(title: confirmTitle(info.name),
                                                      rows: [("Connector", info.server), ("Tool", info.name)] + confirmRows(args: call.args), label: label)
-                        if Task.isCancelled { return "" }
+                        if Task.isCancelled { return done("", cancelled: true) }
                         if approval == .refused { results.append(StepResult(call: call, content: Self.refusedNote, isError: false, image: nil)); continue }
                         guard approval == .approved else {
                             Task { await AuditLog.shared.record(tool: label, argsJSON: argsJSON, outcome: "declined", summary: "declined by user", confirmed: true) }
@@ -1225,13 +1298,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         }
                         do {
                             let output = try await MCPService.shared.callConfiguredTool(server: info.server, name: info.name, arguments: call.args)
-                            Task { await AuditLog.shared.record(tool: label, argsJSON: argsJSON, outcome: "ok", summary: info.name, confirmed: true) }
+                            Task { await AuditLog.shared.record(tool: auditName(label), argsJSON: argsJSON, outcome: "ok", summary: info.name, confirmed: !headless && !TrustSettings.isTrusted(label)) }
                             let summary = "\(info.server): \(info.name.replacingOccurrences(of: "_", with: " "))"
                             conversation.addToolChip(name: label, inputJSON: argsJSON, content: output.isEmpty ? "Done." : output, isError: false, displaySummary: summary)
                             lastToolSummary = output.isEmpty ? "Done — \(summary)." : output
                             results.append(StepResult(call: call, content: output.isEmpty ? "Done." : output, isError: false, image: nil))
                         } catch {
-                            Task { await AuditLog.shared.record(tool: label, argsJSON: argsJSON, outcome: "error", summary: error.localizedDescription, confirmed: true) }
+                            Task { await AuditLog.shared.record(tool: auditName(label), argsJSON: argsJSON, outcome: "error", summary: error.localizedDescription, confirmed: !headless) }
                             results.append(StepResult(call: call, content: "That didn't work — \(error.localizedDescription)", isError: true, image: nil))
                         }
                         continue
@@ -1247,7 +1320,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     if tool.confirmation == .confirm {
                         approval = await approve(title: confirmTitle(call.name), rows: confirmRows(args: call.args), label: call.name,
                                                  destructive: ["delete_file", "move_file", "run_shell"].contains(call.name))
-                        if Task.isCancelled { return "" }
+                        if Task.isCancelled { return done("", cancelled: true) }
                     }
                     if approval == .refused {
                         results.append(StepResult(call: call, content: Self.refusedNote, isError: false, image: nil)); continue
@@ -1255,7 +1328,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     if approval == .approved {
                         let r = await ToolRegistry.execute(name: call.name, args: call.args, in: conversation)
                         // Audit trail — every executed tool, recorded locally.
-                        Task { await AuditLog.shared.record(tool: call.name, argsJSON: argsJSON, outcome: r.isError ? "error" : "ok", summary: r.displaySummary ?? String(r.content.prefix(80)), confirmed: tool.confirmation == .confirm) }
+                        Task { await AuditLog.shared.record(tool: auditName(call.name), argsJSON: argsJSON, outcome: r.isError ? "error" : "ok", summary: r.displaySummary ?? String(r.content.prefix(80)), confirmed: !headless && tool.confirmation == .confirm && !TrustSettings.isTrusted(call.name)) }
                         if !r.isError {
                             lastToolSummary = r.content
                             // Transparency: a chip for what ran — SUCCESSES only, so intermediate
@@ -1288,8 +1361,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if declined {
                 return await forceFinalAnswer("[The user declined that action. Acknowledge briefly, say what (if anything) was already done, and stop — do not retry.]")
             }
-            step += 1
         }
+        return done("")   // unreachable: the step/budget guard above always returns first
     }
 
     /// Who Akari is — sent with EVERY turn (system role on the cloud path; folded
@@ -1310,7 +1383,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// scraped from the reply text instead.
     private func streamTurn(in conversation: Conversation, rules: String = "", instr: String = "", display: Bool = true,
                             tools: [Tool] = [], extraSpecs: [AIToolSpec] = [], loopHistory: [AIMessage] = [],
-                            consumeSlots: Bool = true) async -> TurnOutput {
+                            consumeSlots: Bool = true, effort: AIEffort? = nil) async -> TurnOutput {
         // The per-turn slots (context preamble, memory) are consumed by the turn —
         // except across the steps of one action loop (`consumeSlots: false`), where
         // every step must see the SAME system prompt + user prefix: the model needs
@@ -1365,13 +1438,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // Native tools: rules in the system prompt, schemas as tool definitions.
             // No native tools (compatible server): the prose — with the JSON call
             // format — is folded into the user prefix and the call is scraped below.
-            let system = [Self.akariIdentity, preamble, native ? rules : ""].filter { !$0.isEmpty }.joined(separator: "\n\n")
+            let system = [Self.akariIdentity, UserInstructions.promptBlock, preamble, native ? rules : ""].filter { !$0.isEmpty }.joined(separator: "\n\n")
             let prefix = [native ? "" : rules, instr, memory, consentNote].filter { !$0.isEmpty }.joined(separator: "\n\n")
             let messages = AgentPrompting.messages(from: conversation.visibleMessages, prefix: prefix, image: image) + loopHistory
             guard !messages.isEmpty else { return TurnOutput(text: "", call: nil) }
             let specs = native ? AgentPrompting.uniqueByName(tools.map(AgentPrompting.spec) + extraSpecs) : []   // providers reject duplicate names
             agentLog.info("streamTurn: cloud \(image != nil ? "See" : "Ask", privacy: .public) msgs=\(messages.count) tools=\(specs.count) prompt=\"\(userText.prefix(80), privacy: .public)\"")
-            events = CloudEngine.shared.turn(system: system, messages: messages, tools: specs,
+            events = CloudEngine.shared.turn(system: system, messages: messages, tools: specs, effort: effort,
                                              label: loopHistory.isEmpty ? String(userText.prefix(120)) : "agent step · " + String(userText.prefix(90)))
         }
 
@@ -1382,6 +1455,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if !display { conversation.isAwaitingResponse = true }
         var buf = ""
         var calls: [AgentToolCall] = []
+        var usage: CloudEngine.Usage? = nil
+        var stopReason: String? = nil
         var deltaCount = 0
         let streamStart = Date()
         func onDelta(_ delta: String) {
@@ -1399,7 +1474,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     case .textDelta(let d): onDelta(d)
                     case .toolCall(let id, let name, let json):
                         calls.append(AgentToolCall(id: id, name: name, args: AgentToolCall.parseArgs(json)))
-                    case .usage, .done: break
+                    case .usage(let i, let o, let cr, let cw):
+                        var u = usage ?? CloudEngine.Usage()
+                        if let i { u.input = i }; if let o { u.output = o }; if let cr { u.cacheRead = cr }; if let cw { u.cacheWrite = cw }
+                        usage = u
+                    case .done(let reason): stopReason = reason
                     }
                 }
             }
@@ -1413,7 +1492,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             agentLog.info("streamTurn: answer=\"\(buf.replacingOccurrences(of: "\n", with: " ").prefix(600), privacy: .public)\"")
             #endif
             if display { conversation.finishAssistantStream(at: assistantIdx) } else { conversation.isAwaitingResponse = false }
-            return TurnOutput(text: buf, calls: calls)
+            return TurnOutput(text: buf, calls: calls, usage: usage, stopReason: stopReason)
         } catch {
             agentLog.error("streamTurn threw after \(deltaCount) deltas: \(error.localizedDescription, privacy: .public)")
             conversation.setError(error.localizedDescription)
@@ -1464,7 +1543,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         - save_automation / list_automations / run_automation / delete_automation — automations Akari runs on its own (schedule and/or event); run_subagent(goal) delegates a self-contained sub-task and returns its answer; run_in_background(goal) starts a longer read-only task whose result lands under the notch. Every one of these is confirmed by the user.
         - fetch_url(url) — the readable text of a web page. Connector tools named mcp__… are the user's own MCP integrations (always confirmed).\(WebSettings.searchEnabled ? " web_search — search the web when you need current facts." : "")
         - list_windows / focus_app(name) — what's open, and bring an app to the front (launches it if needed).
-        - read_window([app]) → numbered on-screen elements; click_element(index) presses one (the user confirms); type_text(text) types into the focused field; press_key(key, [modifiers]) e.g. return, tab, escape, command+s; scroll(direction, [amount]); read_screen_text — the visible text via OCR. Work in any app like a person would: read_window → click_element / type_text → read_window again to check.
+        \(UserTools.tools.isEmpty ? "" : "The user's own tools (defined in Settings → Customize; use them like any other):\n" + ToolRegistry.promptSpec(for: UserTools.tools) + "\n")- read_window([app]) → numbered on-screen elements; click_element(index) presses one (the user confirms); type_text(text) types into the focused field; press_key(key, [modifiers]) e.g. return, tab, escape, command+s; scroll(direction, [amount]); read_screen_text — the visible text via OCR. Work in any app like a person would: read_window → click_element / type_text → read_window again to check.
         """
     }
 
@@ -1522,22 +1601,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return !fillers.contains(t)
     }
 
-    /// Present a confirmation card for a `.confirm` tool and SUSPEND the loop until
-    /// the user decides — bridging the existing `ConfirmationRequest.onDecision`
+    /// Confirm-card await — present the card with explicit title + rows and SUSPEND
+    /// the loop until the user taps, bridging the `ConfirmationRequest.onDecision`
     /// callback to a continuation. `withCheckedContinuation` suspends the loop task
-    /// without blocking the MainActor, so the card renders + the tap is processed
-    /// normally. The working-comet pauses while the user decides (the model isn't
-    /// working), and resumes after.
-    @MainActor
-    private func awaitConfirmation(in conversation: Conversation, toolName: String, args: [String: Any]) async -> Bool {
-        await awaitConfirmation(in: conversation, title: confirmTitle(toolName),
-                                rows: confirmRows(args: args), label: toolName,
-                                destructive: ["delete_file", "move_file", "run_shell"].contains(toolName))
-    }
-
-    /// Core confirm-card await — present the card with explicit title + rows and SUSPEND
-    /// the loop until the user taps (bridging `onDecision` → continuation). The comet
-    /// pauses while they decide. Reused by tool calls AND recipe runs.
+    /// without blocking the MainActor, so the card renders and the tap is processed
+    /// normally; the working-comet pauses while the user decides. Used by tool calls,
+    /// recipe runs, and the screenshot-consent question.
     /// DEBUG harness only (`__autoapprove__ on|off`): confirm cards approve themselves so
     /// consequential tools can be exercised without a hand on the notch.
     static var debugAutoApprove = false
@@ -1619,6 +1688,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // unified log (subsystem com.dimarussu.Akari, category Agent). DEBUG-only.
 
     private static let testCmdPath = "/tmp/akari_test_cmd"
+    /// The repo's `tools/` folder (test doubles), from this source file's location.
+    private static let repoToolsDir = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("tools").path
 
     private func startTestHarness() {
         Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
@@ -1864,7 +1935,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     let roundtrip = MCPKeychain.get(key) == secret
                     agentLog.info("keychaintest: set+get roundtrip=\(roundtrip) (want true)")
                     do {
-                        let script = NSHomeDirectory() + "/Developer/AI Cursor Project/Akari/tools/fake_mcp_server.py"
+                        let script = Self.repoToolsDir + "/fake_mcp_server.py"
                         let h = try await MCPService.shared.connect(
                             name: "kctest", command: "/usr/bin/python3", args: [script],
                             env: ["FAKE_TOKEN": "keychain:\(key)", "PLAIN_VAR": "plain-value"])
@@ -1956,7 +2027,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                             agentLog.info("mcptest: DONE")
                         } else {
                             let script = arg.isEmpty
-                                ? NSHomeDirectory() + "/Developer/AI Cursor Project/Akari/tools/fake_mcp_server.py"
+                                ? Self.repoToolsDir + "/fake_mcp_server.py"
                                 : arg
                             let handle = try await MCPService.shared.connect(
                                 name: "mcptest", command: "/usr/bin/python3", args: [script])
@@ -2355,7 +2426,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// expected argument filled correctly) and STRICT (values + no unrequested
     /// optional arguments). Results belong in EVALS.md.
     private func runMCPFillEval() async {
-        let toolsDir = NSHomeDirectory() + "/Developer/AI Cursor Project/Akari/tools"
+        let toolsDir = Self.repoToolsDir
         guard let schemaData = FileManager.default.contents(atPath: toolsDir + "/mcp_schemas.json"),
               let schemas = (try? JSONSerialization.jsonObject(with: schemaData)) as? [String: [[String: Any]]],
               let evalData = FileManager.default.contents(atPath: toolsDir + "/mcp_fill_eval.json"),
@@ -2455,7 +2526,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Run a recipe by id from inside the loop: card → AppleScript → chip → audit. No messages committed.
-    private func performRecipe(id: String, params: [String: Any], conversation: Conversation, autoApprove: Bool = false) async -> (content: String, isError: Bool, declined: Bool) {
+    private func performRecipe(id: String, params: [String: Any], conversation: Conversation, autoApprove: Bool = false, auditLabel: String? = nil) async -> (content: String, isError: Bool, declined: Bool) {
         guard let recipe = RecipeStore.shared.recipes.first(where: { $0.id == id }) else {
             return ("No recipe with id \"\(id)\". Use one of the ids listed for this request, or another tool.", true, false)
         }
@@ -2471,7 +2542,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         do {
             let output = try AppleScriptTool.shared.runScript(script)
-            Task { await AuditLog.shared.record(tool: "recipe:\(recipe.id)", argsJSON: argsJSON, outcome: "ok", summary: recipe.title, confirmed: true) }
+            Task { await AuditLog.shared.record(tool: auditLabel.map { "\($0) › recipe:\(recipe.id)" } ?? "recipe:\(recipe.id)", argsJSON: argsJSON, outcome: "ok", summary: recipe.title, confirmed: !autoApprove) }
             let chipJSON = (try? JSONSerialization.data(withJSONObject: ["purpose": recipe.title])).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
             conversation.addToolChip(name: "run_applescript", inputJSON: chipJSON, content: output.isEmpty ? recipe.title : output, isError: false, displaySummary: recipe.title)
             return (output.isEmpty ? "Done — \(recipe.title.lowercased())." : output, false, false)
@@ -2479,43 +2550,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { await AuditLog.shared.record(tool: "recipe:\(recipe.id)", argsJSON: argsJSON, outcome: "error", summary: error.localizedDescription, confirmed: true) }
             return ("That didn't work — \(error.localizedDescription)", true, false)
         }
-    }
-
-    /// RECIPE RUNNER — if a recipe matches the goal, run it end-to-end: fill params →
-    /// confirm card (recipe title + resolved script = preview) → `run_applescript` →
-    /// audit + chip. Returns true if a recipe handled the turn (loop concludes), false
-    /// to fall through to freeform tools. This is the live agentic path.
-    private func runRecipeIfMatched(goal: String, in conversation: Conversation) async -> Bool {
-        guard let recipe = await matchRecipe(goal: goal) else { return false }
-        agentLog.info("recipe: matched → \(recipe.id, privacy: .public)")
-        let params = await fillParams(recipe: recipe, goal: goal)
-        let script = recipe.resolve(recipe.body, with: params)
-        let title = recipe.resolve(recipe.confirmTemplate, with: params)
-        let argsJSON = (try? JSONSerialization.data(withJSONObject: ["recipe": recipe.id, "params": params]))
-            .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
-        let chipJSON = (try? JSONSerialization.data(withJSONObject: ["purpose": recipe.title]))
-            .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
-
-        let approved = await awaitConfirmation(in: conversation, title: "\(title)?",
-                                               rows: [("Recipe", recipe.title), ("Script", script)],
-                                               label: "recipe:\(recipe.id)", destructive: recipe.id == "empty-trash")
-        if Task.isCancelled { return true }
-        guard approved else {
-            Task { await AuditLog.shared.record(tool: "recipe:\(recipe.id)", argsJSON: argsJSON, outcome: "declined", summary: "declined by user", confirmed: true) }
-            conversation.commitAssistantMessage("Okay, I've left that alone.")
-            return true
-        }
-        do {
-            let output = try AppleScriptTool.shared.runScript(script)
-            Task { await AuditLog.shared.record(tool: "recipe:\(recipe.id)", argsJSON: argsJSON, outcome: "ok", summary: recipe.title, confirmed: true) }
-            conversation.addToolChip(name: "run_applescript", inputJSON: chipJSON,
-                                     content: output.isEmpty ? recipe.title : output, isError: false, displaySummary: recipe.title)
-            conversation.commitAssistantMessage("Done — \(recipe.title.lowercased()).")
-        } catch {
-            Task { await AuditLog.shared.record(tool: "recipe:\(recipe.id)", argsJSON: argsJSON, outcome: "error", summary: error.localizedDescription, confirmed: true) }
-            conversation.commitAssistantMessage("That didn't work — \(error.localizedDescription)")
-        }
-        return true
     }
 
     /// MCP MATCH — prefilter the configured servers' tools against the goal,
@@ -2690,26 +2724,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// NO cards fire — so only `.auto` (read-only / workspace-scoped) registry
     /// tools may run; a `.confirm` tool named by the model is refused and
     /// logged. Every step audits under "routine:<name>".
-    private func runRoutine(_ a: Automation) async -> String {
+    private func runRoutine(_ a: Automation, depth: Int = 0) async -> String {
         // The real loop, headless (ASSISTANT.md phase 4): read-only unless the
-        // automation carries standing consent; every tool audited under its name.
+        // automation carries standing consent; every tool audited under
+        // "routine:<name> › <tool>"; tracked in the ledger so "Stop everything" reaches it.
         let goal = a.routineGoal ?? a.name
-        let policy = a.policy ?? .headlessReadOnly
+        var policy = a.policy ?? .headlessReadOnly
+        policy.label = "routine:\(a.name)"
+        policy.depth = depth
         await AuditLog.shared.record(tool: "routine:\(a.name)", argsJSON: "{}", outcome: "started", summary: policy.standingConsent ? "standing consent" : "read-only", confirmed: policy.standingConsent)
         let convo = Conversation(chatWithApp: "")
         convo.addUserMessage(goal + "\n\n(Deliver the result short and glanceable — 2–4 plain sentences or up to 5 short lines; it appears under the notch.)")
-        let text = (await runAgentLoop(in: convo, goal: goal, policy: policy, headless: true)).trimmingCharacters(in: .whitespacesAndNewlines)
+        let ledgerID = TaskLedger.shared.start(goal: "Routine: \(a.name)")
+        runningAutomationIDs.insert(a.id)
+        let runPolicy = policy
+        let box = AgentRunBox()
+        let handle = Task { @MainActor [weak self] in
+            guard let self else { return }
+            box.run = await self.runAgentLoop(in: convo, goal: goal, policy: runPolicy, headless: true)
+        }
+        TaskLedger.shared.attach(id: ledgerID, task: handle)
+        await handle.value
+        let run = box.run ?? AgentRun(text: "", cancelled: true)
+        runningAutomationIDs.remove(a.id)
+        if run.cancelled || handle.isCancelled {
+            await AuditLog.shared.record(tool: "routine:\(a.name)", argsJSON: "{}", outcome: "cancelled", summary: AICost.format(run.costUSD), confirmed: policy.standingConsent)
+            TaskLedger.shared.finish(id: ledgerID, result: "Cancelled.", costUSD: run.costUSD)
+            return ""
+        }
+        let text = run.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        TaskLedger.shared.finish(id: ledgerID, result: text, costUSD: run.costUSD)
         await AuditLog.shared.record(tool: "routine:\(a.name)", argsJSON: "{}", outcome: text.isEmpty ? "error" : "ok",
-                                     summary: "\(AICost.format(convo.lastRunCostUSD)) · \(text.prefix(80))", confirmed: policy.standingConsent)
+                                     summary: "\(AICost.format(run.costUSD)) · \(text.prefix(80))", confirmed: policy.standingConsent)
         return text.isEmpty ? "Routine “\(a.name)” ran — but came back empty." : String(text.prefix(800))
     }
 
     /// Run a saved automation WITHOUT a card (standing consent granted at save time).
     /// `extra` carries trigger context (e.g. trigger_file = the new file's path) that
     /// substitutes into the body AFTER the recipe's own params.
-    private func runAutomation(_ a: Automation, extra: [String: String] = [:]) async {
+    private func runAutomation(_ a: Automation, extra: [String: String] = [:], depth: Int = 0) async {
         if a.routineGoal != nil {
-            let summary = await runRoutine(a)
+            let summary = await runRoutine(a, depth: depth)
+            guard !summary.isEmpty else { return }   // cancelled: no pill, audited as such
             NotchController.shared.notifyResult(summary)
             agentLog.info("routine \(a.name, privacy: .public): delivered — \(summary.prefix(120), privacy: .public)")
             return
@@ -2974,6 +3030,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         save(SettingsBody(), width: 560, height: 1500, to: "/tmp/akari_settings.png")
+        save(SettingsCustomizePreview(), width: 560, height: 1500, to: "/tmp/akari_customize.png")
         save(ConnectStep(onContinue: {}).padding(24), width: 560, height: 440, to: "/tmp/akari_connect.png")
     }
 
@@ -3220,6 +3277,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Phase 4: policies, ledger, agent tools, old automations still decode.
         check("policy: json round trip + defaults", { let p = AgentPolicy(allowedTools: ["a"], maxSteps: 7, budgetUSD: 0.1, standingConsent: true); let d = try! JSONEncoder().encode(p); return try! JSONDecoder().decode(AgentPolicy.self, from: d) == p && AgentPolicy().maxSteps == 15 && !AgentPolicy().standingConsent }())
         check("policy: child never gains consent or exceeds parent", { let c = AgentPolicy(maxSteps: 8, budgetUSD: 1.0, standingConsent: true).child(allowedTools: ["x"], maxSteps: 30); return c.maxSteps == 8 && c.budgetUSD == 0.25 && !c.standingConsent && c.depth == 1 && c.allows("x") && !c.allows("y") && AgentPolicy().allows("anything") }())
+        check("policy: child tool list is parent ∩ requested", { let p = AgentPolicy(allowedTools: ["a", "b"]); let c = p.child(allowedTools: ["b", "c"], maxSteps: 5, label: "L"); let d = p.child(allowedTools: nil, maxSteps: 5); return c.allows("b") && !c.allows("a") && !c.allows("c") && d.allows("a") && !d.allows("z") && c.label == "L" && c.effort == .medium && AgentPolicy().child(allowedTools: ["q"], maxSteps: 3).allows("q") }())
+        check("policy: effort + label round trip", { var p = AgentPolicy(); p.effort = .high; p.label = "routine:X"; let d = try! JSONEncoder().encode(p); return try! JSONDecoder().decode(AgentPolicy.self, from: d) == p }())
+        check("anthropic: strict only for our schemas", (AnthropicProvider.encodeTool(AgentPrompting.pointAtSpec)["strict"] as? Bool) == true && AnthropicProvider.encodeTool(AIToolSpec(name: "mcp_x", description: "d", inputSchema: ["type": "object"]))["strict"] == nil)
+        check("agent run: defaults", { let r = AgentRun(text: "t"); return r.costUSD == 0 && !r.cancelled && TurnOutput(text: "", calls: []).usage == nil }())
+        // Customization: user tools, trust, instructions (CUSTOMIZING.md).
+        check("user tools: validate names + runners", { let ok = UserToolDef(name: "my_tool2", description: "d", runner: "shell", script: "true"); let r: Set<String> = ["list_files"]; return UserTools.validate(ok, reserved: r, taken: []) == nil && UserTools.validate(UserToolDef(name: "list_files", description: "d", runner: "shell", script: "x"), reserved: r, taken: []) != nil && UserTools.validate(UserToolDef(name: "Bad-Name", description: "d", runner: "shell", script: "x"), reserved: r, taken: []) != nil && UserTools.validate(UserToolDef(name: "mcp__x", description: "d", runner: "shell", script: "x"), reserved: r, taken: []) != nil && UserTools.validate(UserToolDef(name: "t2", description: "d", runner: "python", script: "x"), reserved: r, taken: []) != nil && UserTools.validate(ok, reserved: r, taken: ["my_tool2"]) != nil && UserTools.validate(UserToolDef(name: "t3", description: "d", params: ["bad key": UserToolParam()], runner: "shell", script: "x"), reserved: r, taken: []) != nil }())
+        check("user tools: schema from params", { let d = UserToolDef(name: "t", description: "d", params: ["msg": UserToolParam(type: "string", description: "m", required: true), "n": UserToolParam(type: "integer"), "weird": UserToolParam(type: "array")], runner: "shell", script: "x"); let sch = UserTools.schema(for: d); let props = sch["properties"] as? [String: [String: Any]]; return (sch["type"] as? String) == "object" && (sch["required"] as? [String]) == ["msg"] && (props?["n"]?["type"] as? String) == "integer" && (props?["weird"]?["type"] as? String) == "string" && (sch["additionalProperties"] as? Bool) == false && UserTools.tool(for: d).confirmation == .confirm && UserTools.tool(for: UserToolDef(name: "t", description: "d", runner: "shell", script: "x", confirm: false)).confirmation == .auto }())
+        check("user tools: placeholders + env names + values", { let d = UserToolDef(name: "t", description: "d", params: ["msg": UserToolParam(), "flag": UserToolParam(type: "boolean"), "n": UserToolParam(type: "number"), "missing": UserToolParam()], runner: "shell", script: "x"); let args: [String: Any] = (try? JSONSerialization.jsonObject(with: Data(#"{"msg":"say \"hi\"","flag":true,"n":1}"#.utf8))) as? [String: Any] ?? [:]; let v = UserTools.stringValues(args, for: d); return v["msg"] == "say \"hi\"" && v["flag"] == "true" && v["n"] == "1" && v["missing"] == "" && UserTools.envName("file name-2") == "FILE_NAME_2" && UserTools.substitute("echo {{msg}} {{missing}}!", v, quoting: .none) == "echo say \"hi\" !" && UserTools.substitute("display \"{{msg}}\"", v, quoting: .appleScript) == "display \"say \\\"hi\\\"\"" }())
+        check("trust: disabled + don't ask round trip; alwaysAsk never trusted", { let n = "__selftest_tool__"; TrustSettings.setDisabled(n, true); let off = TrustSettings.isDisabled(n); TrustSettings.setDisabled(n, false); TrustSettings.setDontAsk(n, true); let trusted = TrustSettings.isTrusted(n); TrustSettings.setDontAsk(n, false); TrustSettings.setDontAsk("save_automation", true); let never = !TrustSettings.isTrusted("save_automation"); TrustSettings.setDontAsk("save_automation", false); return off && !TrustSettings.isDisabled(n) && trusted && !TrustSettings.isTrusted(n) && never }())
+        check("instructions: block empty ↔ text; capped", UserInstructions.block(for: "  \n ").isEmpty && UserInstructions.block(for: "Call me Dee").hasSuffix("Call me Dee") && UserInstructions.block(for: String(repeating: "x", count: 9000)).count < 4300)
+        check("registry: all = builtins + user tools", ToolRegistry.all.count == ToolRegistry.builtinTools.count + UserTools.tools.count && UserTools.reservedNames.contains("list_files") && UserTools.reservedNames.contains("run_subagent"))
         check("automation: old json decodes with no policy", { let json = #"{"id":"1","name":"n","recipeId":"r","paramsJSON":"{}","enabled":true,"lastRunKey":""}"#; let a = try? JSONDecoder().decode(Automation.self, from: Data(json.utf8)); return a?.policy == nil && a?.name == "n" }())
         check("ledger: start → finish", { let l = TaskLedger(); let id = l.start(goal: "g"); let running = l.running.count == 1; l.finish(id: id, result: "ok"); return running && l.entries.first?.status == .done && l.entries.first?.result == "ok" && id.count == 8 }())
         check("agent tools: six, consent kinds", AgentTools.tools.count == 6 && AgentTools.tools.filter { $0.confirmation == .confirm }.map(\.name).sorted() == ["delete_automation", "run_automation", "run_in_background", "run_subagent", "save_automation"])

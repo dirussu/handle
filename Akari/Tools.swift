@@ -59,42 +59,6 @@ struct ToolResultBlock {
     }
 }
 
-/// A server-side tool that Anthropic executes for us (e.g. `web_search`).
-/// We just declare it; Claude calls it; results come back automatically.
-struct ServerTool {
-    let definition: [String: Any]
-    /// Optional `anthropic-beta` header value this tool requires.
-    let betaHeader: String?
-
-    /// Anthropic-hosted web search. Limits per-turn searches to `maxUses`
-    /// for cost control. Optional `allowedDomains` whitelist scopes results.
-    static func webSearch(maxUses: Int = 5, allowedDomains: [String]? = nil) -> ServerTool {
-        var def: [String: Any] = [
-            "type": "web_search_20250305",
-            "name": "web_search",
-            "max_uses": maxUses,
-        ]
-        if let allowedDomains, !allowedDomains.isEmpty {
-            def["allowed_domains"] = allowedDomains
-        }
-        return ServerTool(definition: def, betaHeader: nil)
-    }
-
-    /// Anthropic-hosted Python code execution sandbox. The model writes Python,
-    /// Anthropic runs it server-side, and the result is fed back. Useful for
-    /// calculations, unit conversions, data analysis, generating files,
-    /// image manipulation, etc. Requires the code-execution beta header.
-    static func codeExecution() -> ServerTool {
-        ServerTool(
-            definition: [
-                "type": "code_execution_20250522",
-                "name": "code_execution",
-            ],
-            betaHeader: "code-execution-2025-05-22"
-        )
-    }
-}
-
 /// A request for the user to confirm a write/send tool call.
 /// The orchestrator awaits the user's decision via `onDecision`.
 struct ConfirmationRequest: Identifiable {

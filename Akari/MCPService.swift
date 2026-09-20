@@ -535,15 +535,20 @@ extension MCPService {
 @MainActor
 enum MCPLoopTools {
     nonisolated static func toolName(server: String, name: String) -> String {
-        func clean(_ s: String) -> String {
-            String(s.map { $0.isLetter || $0.isNumber || $0 == "_" || $0 == "-" ? $0 : "_" })
+        func clean(_ s: String) -> String {   // the providers' rule: ^[a-zA-Z0-9_-]{1,64}$
+            String(s.map { ($0.isASCII && ($0.isLetter || $0.isNumber)) || $0 == "_" || $0 == "-" ? $0 : "_" })
         }
         let full = "mcp__\(clean(server))__\(clean(name))"
         return full.count > 64 ? String(full.prefix(64)) : full
     }
 
+    /// Providers cap the tools array (OpenAI: 128); keep the loop well under it.
+    static let maxTools = 80
+
     static func make(_ infos: [MCPToolInfo]) -> (tools: [Tool], map: [String: MCPToolInfo]) {
         var tools: [Tool] = []; var map: [String: MCPToolInfo] = [:]
+        if infos.count > maxTools { mcpLog.error("mcp loop: \(infos.count) tools configured — only the first \(Self.maxTools) are offered") }
+        let infos = Array(infos.prefix(maxTools))
         for info in infos {
             var name = toolName(server: info.server, name: info.name)
             var n = 2

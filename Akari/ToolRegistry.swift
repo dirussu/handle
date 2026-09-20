@@ -12,9 +12,13 @@ import EventKit
 /// must move to AX-select before it's wired. So this registry is action tools only.
 @MainActor
 enum ToolRegistry {
-    /// Every dispatchable action tool. (Built with incremental appends rather than
+    /// Every dispatchable action tool: the built-ins plus the user's own
+    /// (`UserTools`, one JSON file each — see CUSTOMIZING.md).
+    static var all: [Tool] { builtinTools + UserTools.tools }
+
+    /// The tools Akari ships with. (Built with incremental appends rather than
     /// one big `+` chain, which Swift's type-checker chokes on.)
-    static var all: [Tool] {
+    static var builtinTools: [Tool] {
         var t: [Tool] = []
         t += FileTools.tools
         t += CalendarTools.tools
@@ -112,7 +116,7 @@ enum ToolRegistry {
                 return ToolResult(content: try await ScreenTools.typeText(input.text), isError: false, displaySummary: "Typed \(input.text.count) chars")
             case "press_key":
                 let input = try FileTools.shared.decode(PressKeyInput.self, from: argsJSON)
-                return ToolResult(content: try ScreenTools.pressKey(input.key, modifiers: input.modifiers ?? []), isError: false, displaySummary: "Pressed \(input.key)")
+                return ToolResult(content: try await ScreenTools.pressKey(input.key, modifiers: input.modifiers ?? []), isError: false, displaySummary: "Pressed \(input.key)")
             case "scroll":
                 let input = try FileTools.shared.decode(ScrollInput.self, from: argsJSON)
                 return ToolResult(content: try ScreenTools.scroll(direction: input.direction, amount: input.amount ?? 5), isError: false, displaySummary: "Scrolled \(input.direction)")
@@ -172,6 +176,9 @@ enum ToolRegistry {
                 try MessageTools.shared.openMessageDraft(to: input.to, body: input.body)
                 return ToolResult(content: "Opened a message draft\(input.to.map { " to \($0)" } ?? "") in Messages — review and send it yourself.",
                                   isError: false, displaySummary: "Message draft ready")
+            case _ where UserTools.definition(named: name) != nil:   // a user tool (CUSTOMIZING.md)
+                let out = try await UserTools.run(UserTools.definition(named: name)!, args: args)
+                return ToolResult(content: out, isError: false, displaySummary: "Ran \(name)")
             default:
                 return ToolResult(content: "The tool '\(name)' isn't wired yet — answer the user directly.", isError: true)
             }

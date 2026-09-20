@@ -130,17 +130,15 @@ nonisolated struct AnthropicProvider: AIProvider {
 
     static func encodeTool(_ tool: AIToolSpec) -> [String: Any] {
         // A server-side tool (web search): `type` + `name` (+ options), no schema.
-        if let serverType = tool.inputSchema["__server_type"] as? String {
+        if let serverType = tool.serverType {
             var t: [String: Any] = ["type": serverType, "name": tool.name]
-            for (k, v) in tool.inputSchema where k != "__server_type" { t[k] = v }
+            for (k, v) in tool.inputSchema { t[k] = v }
             return t
         }
         var t: [String: Any] = ["name": tool.name, "description": tool.description, "input_schema": tool.inputSchema]
-        // strict needs additionalProperties:false + required on the schema; only
-        // opt in when the schema was written for it.
-        if let ap = tool.inputSchema["additionalProperties"] as? Bool, ap == false, tool.inputSchema["required"] != nil {
-            t["strict"] = true
-        }
+        // strict only for schemas we wrote (needs additionalProperties:false +
+        // required); third-party (MCP) schemas carry keywords strict mode rejects.
+        if tool.strict { t["strict"] = true }
         return t
     }
 

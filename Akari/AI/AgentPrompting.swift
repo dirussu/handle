@@ -21,9 +21,21 @@ struct AgentToolCall {
 struct TurnOutput {
     var text: String
     var calls: [AgentToolCall]
+    /// The request's own usage (nil when no request was made) and stop reason.
+    var usage: CloudEngine.Usage? = nil
+    var stopReason: String? = nil
     var call: AgentToolCall? { calls.first }
-    init(text: String, calls: [AgentToolCall]) { self.text = text; self.calls = calls }
+    init(text: String, calls: [AgentToolCall], usage: CloudEngine.Usage? = nil, stopReason: String? = nil) {
+        self.text = text; self.calls = calls; self.usage = usage; self.stopReason = stopReason
+    }
     init(text: String, call: AgentToolCall?) { self.text = text; self.calls = call.map { [$0] } ?? [] }
+}
+
+/// What one agent run produced.
+struct AgentRun {
+    var text: String
+    var costUSD: Double = 0
+    var cancelled: Bool = false
 }
 
 /// Provider-neutral prompt pieces for the agent loop (PROVIDERS.md phase 1):
@@ -75,7 +87,7 @@ enum AgentPrompting {
         description: "Point at ONE on-screen element from the numbered list in the user's message, by its index. Use -1 if none of the listed elements matches what the user asked for — never force a wrong match.",
         inputSchema: ["type": "object",
                       "properties": ["index": ["type": "integer", "description": "Index from the on-screen element list, or -1 for no match."]],
-                      "required": ["index"], "additionalProperties": false])
+                      "required": ["index"], "additionalProperties": false], strict: true)
 
     /// Providers reject duplicate tool names in one request; first definition wins.
     /// (`recapture_screen` lives in FileTools' registry entry — the loop intercepts

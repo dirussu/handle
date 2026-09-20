@@ -85,6 +85,7 @@ enum ScreenTools {
             return "\(app.localizedName ?? name) is now in front."
         }
         let trimmed = name.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.contains("/"), !trimmed.contains(".."), !trimmed.hasPrefix(".") else { throw ScreenToolError.appNotFound(trimmed) }
         let candidates = [URL(fileURLWithPath: "/Applications/\(trimmed).app"),
                           URL(fileURLWithPath: "/System/Applications/\(trimmed).app"),
                           URL(fileURLWithPath: "/System/Applications/Utilities/\(trimmed).app")]
@@ -106,7 +107,7 @@ enum ScreenTools {
         if SeeSettings.isExcluded(target?.bundleIdentifier) {
             return "Not read: \(target?.localizedName ?? "that app") is on the user's excluded-apps list."
         }
-        let screen = NSScreen.screens.first(where: { $0.frame.contains(NSEvent.mouseLocation) }) ?? NSScreen.main ?? NSScreen.screens[0]
+        let screen = PointingOverlay.currentScreen()
         let rect = CGRect(origin: .zero, size: screen.frame.size)
         let elements = AccessibilityProbe.elements(in: rect, of: target?.bundleIdentifier, limit: max(10, min(limit, 150)))
         conversation.axElements = elements
@@ -163,7 +164,7 @@ enum ScreenTools {
         return f
     }
 
-    static func pressKey(_ name: String, modifiers: [String]) throws -> String {
+    static func pressKey(_ name: String, modifiers: [String]) async throws -> String {
         guard let code = keyCode(for: name) else { throw ScreenToolError.unknownKey(name) }
         let src = CGEventSource(stateID: .hidSystemState)
         let flags = flags(for: modifiers)
@@ -172,7 +173,7 @@ enum ScreenTools {
             throw ScreenToolError.eventFailed
         }
         down.flags = flags; up.flags = flags
-        down.post(tap: .cghidEventTap); usleep(15_000); up.post(tap: .cghidEventTap)
+        down.post(tap: .cghidEventTap); try await Task.sleep(for: .milliseconds(15)); up.post(tap: .cghidEventTap)
         let mods = modifiers.isEmpty ? "" : modifiers.joined(separator: "+") + "+"
         return "Pressed \(mods)\(name)."
     }
@@ -183,7 +184,7 @@ enum ScreenTools {
         guard !text.isEmpty else { return "(nothing to type)" }
         if text.count > 300 {
             let prior = ClipboardScratch.setString(text)
-            _ = try pressKey("v", modifiers: ["command"])
+            _ = try await pressKey("v", modifiers: ["command"])
             try await Task.sleep(for: .milliseconds(400))
             ClipboardScratch.restore(prior)
             return "Pasted \(text.count) characters into the focused field (clipboard restored)."
@@ -200,7 +201,7 @@ enum ScreenTools {
                 down.post(tap: .cghidEventTap); up.post(tap: .cghidEventTap)
                 try await Task.sleep(for: .milliseconds(12))
             }
-            if i < lines.count - 1 { _ = try pressKey("return", modifiers: []) ; try await Task.sleep(for: .milliseconds(30)) }
+            if i < lines.count - 1 { _ = try await pressKey("return", modifiers: []); try await Task.sleep(for: .milliseconds(30)) }
         }
         return "Typed \(text.count) characters."
     }
@@ -234,13 +235,19 @@ enum ScreenTools {
         if SeeSettings.isExcluded(front?.bundleIdentifier) {
             return "Not read: \(front?.localizedName ?? "the front app") is on the user's excluded-apps list."
         }
-        let screen = NSScreen.screens.first(where: { $0.frame.contains(NSEvent.mouseLocation) }) ?? NSScreen.main ?? NSScreen.screens[0]
+        let screen = PointingOverlay.currentScreen()
         let image = try await ScreenCapture.captureRegion(CGRect(origin: .zero, size: screen.frame.size), on: screen)
         let text = try await OCR.recognize(in: image)
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty { return "(no readable text on screen)" }
         return trimmed.count > 8000 ? String(trimmed.prefix(8000)) + "\n…(truncated)" : trimmed
     }
+}
+
+/// `.auto` tools that still change what the user sees — never run unattended
+/// without standing consent (ASSISTANT.md: every action visible).
+extension ScreenTools {
+    static let sideEffectingAutoTools: Set<String> = ["focus_app", "scroll"]
 }
 
 enum ScreenToolError: LocalizedError {

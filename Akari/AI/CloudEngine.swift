@@ -70,9 +70,13 @@ final class CloudEngine: ObservableObject {
                     if stop == "refusal" && !sawContent { throw AIProviderError.refusal(category: nil) }
                     log.info("cloud turn: \(provider.id, privacy: .public)/\(model, privacy: .public) in=\(usage.input) out=\(usage.output) cache(r=\(usage.cacheRead) w=\(usage.cacheWrite)) tools=\(request.tools.count) stop=\(stop ?? "-", privacy: .public) \(String(format: "%.1f", Date().timeIntervalSince(t0)), privacy: .public)s")
                     await self?.record(usage, sent: record)
+                    // One consolidated usage event so the caller can price THIS request
+                    // (the agent loop's per-run budget) without reading shared state.
+                    continuation.yield(.usage(input: usage.input, output: usage.output, cacheRead: usage.cacheRead, cacheWrite: usage.cacheWrite))
                     continuation.finish()
                 } catch {
                     await self?.record(usage, sent: record)
+                    continuation.yield(.usage(input: usage.input, output: usage.output, cacheRead: usage.cacheRead, cacheWrite: usage.cacheWrite))
                     continuation.finish(throwing: error)
                 }
             }

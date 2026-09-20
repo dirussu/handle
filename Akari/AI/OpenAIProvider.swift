@@ -107,7 +107,7 @@ nonisolated struct OpenAIProvider: AIProvider {
             "stream": true,
             "stream_options": ["include_usage": true],
         ]
-        let clientTools = request.tools.filter { $0.inputSchema["__server_type"] == nil }   // server-side tools are Anthropic-only
+        let clientTools = request.tools.filter { $0.serverType == nil }   // server-side tools are Anthropic-only
         if includeTools && !clientTools.isEmpty { body["tools"] = clientTools.map(encodeTool) }
         return body
     }
