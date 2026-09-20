@@ -24,6 +24,8 @@ enum ToolRegistry {
         t += AppleScriptTool.tools
         t += ShortcutsTools.tools
         t += ShellTool.tools
+        t += ScreenTools.tools
+        t += WebTools.tools
         return t
     }
 
@@ -87,6 +89,35 @@ enum ToolRegistry {
                 let due = reminder.dueDateComponents?.date.map { " (due \(ReminderTools.format($0)))" } ?? ""
                 return ToolResult(content: "Added reminder “\(reminder.title ?? input.title)”\(due).",
                                   isError: false, displaySummary: "Reminder added")
+            case "create_folder":
+                let input = try FileTools.shared.decode(CreateFolderInput.self, from: argsJSON)
+                let path = try FileTools.shared.createFolder(input: input)
+                return ToolResult(content: "Created folder \(path.path).", isError: false, displaySummary: "Folder created")
+            case "fetch_url":
+                let input = try FileTools.shared.decode(FetchURLInput.self, from: argsJSON)
+                return ToolResult(content: try await WebTools.fetch(input.url), isError: false, displaySummary: "Fetched \(URL(string: input.url)?.host ?? input.url)")
+            case "list_windows":
+                return ToolResult(content: await ScreenTools.listWindows(), isError: false, displaySummary: "Listed windows")
+            case "focus_app":
+                let input = try FileTools.shared.decode(FocusAppInput.self, from: argsJSON)
+                return ToolResult(content: try await ScreenTools.focusApp(named: input.name), isError: false, displaySummary: "Focused \(input.name)")
+            case "read_window":
+                let input = try FileTools.shared.decode(ReadWindowInput.self, from: argsJSON)
+                let text = ScreenTools.readWindow(app: input.app, limit: input.limit ?? 60, conversation: conversation)
+                return ToolResult(content: text, isError: false, displaySummary: "Read \(conversation.axElements.count) element(s)")
+            case "click_element":
+                return ToolResult(content: "click_element is executed by the agent loop.", isError: true, displaySummary: nil)
+            case "type_text":
+                let input = try FileTools.shared.decode(TypeTextInput.self, from: argsJSON)
+                return ToolResult(content: try await ScreenTools.typeText(input.text), isError: false, displaySummary: "Typed \(input.text.count) chars")
+            case "press_key":
+                let input = try FileTools.shared.decode(PressKeyInput.self, from: argsJSON)
+                return ToolResult(content: try ScreenTools.pressKey(input.key, modifiers: input.modifiers ?? []), isError: false, displaySummary: "Pressed \(input.key)")
+            case "scroll":
+                let input = try FileTools.shared.decode(ScrollInput.self, from: argsJSON)
+                return ToolResult(content: try ScreenTools.scroll(direction: input.direction, amount: input.amount ?? 5), isError: false, displaySummary: "Scrolled \(input.direction)")
+            case "read_screen_text":
+                return ToolResult(content: try await ScreenTools.readScreenText(), isError: false, displaySummary: "Read screen text")
             case "list_files":
                 let names = try FileTools.shared.listFiles(input: FileTools.shared.decode(ListFilesInput.self, from: argsJSON))
                 return ToolResult(content: names.isEmpty ? "(empty folder)" : names.joined(separator: "\n"),
@@ -182,4 +213,6 @@ struct ToolResult {
     let content: String
     let isError: Bool
     var displaySummary: String? = nil
+    /// A screenshot the tool took — goes to the model inside the tool result.
+    var attachedImage: CGImage? = nil
 }

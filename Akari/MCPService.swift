@@ -527,3 +527,34 @@ final class MCPService {
 extension MCPService {
     nonisolated static func toolNames(_ tools: [MCP.Tool]) -> [String] { tools.map(\.name) }
 }
+
+
+/// Configured MCP tools as loop tools (ASSISTANT.md phase 3): one native tool per
+/// server tool, named `mcp__<server>__<tool>` (sanitised to the providers' name
+/// rules), every one confirmed. The map takes a sanitised name back to its info.
+@MainActor
+enum MCPLoopTools {
+    nonisolated static func toolName(server: String, name: String) -> String {
+        func clean(_ s: String) -> String {
+            String(s.map { $0.isLetter || $0.isNumber || $0 == "_" || $0 == "-" ? $0 : "_" })
+        }
+        let full = "mcp__\(clean(server))__\(clean(name))"
+        return full.count > 64 ? String(full.prefix(64)) : full
+    }
+
+    static func make(_ infos: [MCPToolInfo]) -> (tools: [Tool], map: [String: MCPToolInfo]) {
+        var tools: [Tool] = []; var map: [String: MCPToolInfo] = [:]
+        for info in infos {
+            var name = toolName(server: info.server, name: info.name)
+            var n = 2
+            while map[name] != nil { name = String(toolName(server: info.server, name: info.name).prefix(60)) + "_\(n)"; n += 1 }
+            var schema = info.schema
+            if schema["type"] == nil { schema["type"] = "object" }
+            if schema["properties"] == nil { schema["properties"] = [String: Any]() }
+            tools.append(Tool(name: name, description: "[\(info.server) connector] " + String(info.description.prefix(400)),
+                              inputSchema: schema, confirmation: .confirm))
+            map[name] = info
+        }
+        return (tools, map)
+    }
+}

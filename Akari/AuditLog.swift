@@ -46,6 +46,21 @@ actor AuditLog {
         append(json + "\n")
     }
 
+    /// One parsed line (pure).
+    nonisolated static func parseLine(_ line: String) -> (ts: String, tool: String, outcome: String, summary: String)? {
+        guard let d = line.data(using: .utf8), let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+              let tool = o["tool"] as? String else { return nil }
+        return (o["ts"] as? String ?? "", tool, o["outcome"] as? String ?? "", o["summary"] as? String ?? "")
+    }
+
+    /// The newest record for a tool label (e.g. "routine:Morning mail"), if any.
+    func lastRun(for label: String) -> (ts: String, outcome: String, summary: String)? {
+        for line in recent(400).reversed() {
+            if let r = Self.parseLine(line), r.tool == label { return (r.ts, r.outcome, r.summary) }
+        }
+        return nil
+    }
+
     /// The most recent `limit` raw JSONL lines (newest last).
     func recent(_ limit: Int = 50) -> [String] {
         guard let content = try? String(contentsOf: url, encoding: .utf8) else { return [] }

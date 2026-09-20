@@ -87,6 +87,8 @@ final class Conversation {
     var captureWithheld: ScreenshotStatus?
     /// Ask-before-send decision for the current user turn (nil = not asked yet).
     var screenSendDecision: Bool?
+    /// What the last agent run on this conversation cost (estimate; 0 when unpriced).
+    var lastRunCostUSD: Double = 0
     /// Pixel dimensions of the most-recent capture (after API preparation).
     /// Used by point_at to translate from image pixels to capture-rect points.
     var currentImagePixelSize: CGSize?

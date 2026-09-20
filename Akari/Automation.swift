@@ -20,6 +20,7 @@ struct Automation: Codable, Identifiable {
     var enabled: Bool = true
     var lastRunKey: String = ""       // "yyyy-MM-dd-HH-mm" — dedupe so a minute fires once
     var routineGoal: String?          // set = ROUTINE (see above); recipeId is ignored
+    var policy: AgentPolicy? = nil    // what a routine may do (nil = read-only, no standing consent)
 
     /// A routine's display name: the goal's first line, capped like chat titles.
     static func routineName(_ goal: String) -> String {

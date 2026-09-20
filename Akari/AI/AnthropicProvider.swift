@@ -113,14 +113,28 @@ nonisolated struct AnthropicProvider: AIProvider {
         case .toolCall(let id, let name, let json):
             let input = (try? JSONSerialization.jsonObject(with: Data(json.utf8))) as? [String: Any] ?? [:]
             return ["type": "tool_use", "id": id, "name": name, "input": input]
-        case .toolResult(let id, let text, let isError):
-            var block: [String: Any] = ["type": "tool_result", "tool_use_id": id, "content": text]
+        case .toolResult(let id, let text, let isError, let image):
+            var block: [String: Any] = ["type": "tool_result", "tool_use_id": id]
+            if let image {   // text + image blocks inside the result
+                var content: [[String: Any]] = []
+                if !text.isEmpty { content.append(["type": "text", "text": text]) }
+                content.append(["type": "image", "source": ["type": "base64", "media_type": "image/jpeg", "data": image.base64EncodedString()]])
+                block["content"] = content
+            } else {
+                block["content"] = text
+            }
             if isError { block["is_error"] = true }
             return block
         }
     }
 
     static func encodeTool(_ tool: AIToolSpec) -> [String: Any] {
+        // A server-side tool (web search): `type` + `name` (+ options), no schema.
+        if let serverType = tool.inputSchema["__server_type"] as? String {
+            var t: [String: Any] = ["type": serverType, "name": tool.name]
+            for (k, v) in tool.inputSchema where k != "__server_type" { t[k] = v }
+            return t
+        }
         var t: [String: Any] = ["name": tool.name, "description": tool.description, "input_schema": tool.inputSchema]
         // strict needs additionalProperties:false + required on the schema; only
         // opt in when the schema was written for it.

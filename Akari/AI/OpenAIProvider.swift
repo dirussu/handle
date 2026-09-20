@@ -107,7 +107,8 @@ nonisolated struct OpenAIProvider: AIProvider {
             "stream": true,
             "stream_options": ["include_usage": true],
         ]
-        if includeTools && !request.tools.isEmpty { body["tools"] = request.tools.map(encodeTool) }
+        let clientTools = request.tools.filter { $0.inputSchema["__server_type"] == nil }   // server-side tools are Anthropic-only
+        if includeTools && !clientTools.isEmpty { body["tools"] = clientTools.map(encodeTool) }
         return body
     }
 
@@ -136,19 +137,26 @@ nonisolated struct OpenAIProvider: AIProvider {
             case .user, .tool:
                 var content: [[String: Any]] = []
                 var results: [[String: Any]] = []
+                var resultImages: [Data] = []   // tool messages are text-only here; images follow as a user message
                 for part in m.parts {
                     switch part {
                     case .text(let t):
                         if !t.isEmpty { content.append(["type": "text", "text": t]) }
                     case .image(let data, let mime):
                         content.append(["type": "image_url", "image_url": ["url": "data:\(mime);base64,\(data.base64EncodedString())"]])
-                    case .toolResult(let id, let text, _):
+                    case .toolResult(let id, let text, _, let image):
                         results.append(["role": "tool", "tool_call_id": id, "content": text])
+                        if let image { resultImages.append(image) }
                     case .toolCall:
                         break
                     }
                 }
                 out.append(contentsOf: results)
+                if !resultImages.isEmpty {
+                    var parts: [[String: Any]] = resultImages.map { ["type": "image_url", "image_url": ["url": "data:image/jpeg;base64,\($0.base64EncodedString())"]] }
+                    parts.insert(["type": "text", "text": "(Screenshot returned by the tool above.)"], at: 0)
+                    out.append(["role": "user", "content": parts])
+                }
                 if content.count == 1, let only = content.first, only["type"] as? String == "text", let t = only["text"] {
                     out.append(["role": "user", "content": t])
                 } else if !content.isEmpty {

@@ -16,11 +16,14 @@ struct AgentToolCall {
     }
 }
 
-/// What one model turn produced: the (buffered or streamed) text and the first
-/// tool call, if the model made one.
+/// What one model turn produced: the (buffered or streamed) text and every tool
+/// call the model made in it (parallel calls run together, results go back together).
 struct TurnOutput {
     var text: String
-    var call: AgentToolCall?
+    var calls: [AgentToolCall]
+    var call: AgentToolCall? { calls.first }
+    init(text: String, calls: [AgentToolCall]) { self.text = text; self.calls = calls }
+    init(text: String, call: AgentToolCall?) { self.text = text; self.calls = call.map { [$0] } ?? [] }
 }
 
 /// Provider-neutral prompt pieces for the agent loop (PROVIDERS.md phase 1):
@@ -80,6 +83,23 @@ enum AgentPrompting {
     static func uniqueByName(_ specs: [AIToolSpec]) -> [AIToolSpec] {
         var seen = Set<String>()
         return specs.filter { seen.insert($0.name).inserted }
+    }
+
+    // MARK: Loop history hygiene
+
+    /// Drop the images from earlier tool results — each screenshot costs ~1.5k
+    /// tokens on EVERY later step; only the newest one is worth carrying. Pure.
+    static func stripImages(from history: [AIMessage]) -> [AIMessage] {
+        history.map { m in
+            var m = m
+            m.parts = m.parts.map { part in
+                if case .toolResult(let id, let text, let isError, let image) = part, image != nil {
+                    return .toolResult(id: id, text: text + " (earlier screenshot omitted)", isError: isError, image: nil)
+                }
+                return part
+            }
+            return m
+        }
     }
 
     // MARK: Conversation → provider messages

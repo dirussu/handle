@@ -22,8 +22,9 @@ nonisolated struct AIMessage: Sendable {
         /// A tool call the assistant made (id is provider-issued, echoed back
         /// on the matching `.toolResult`). `argumentsJSON` is a JSON object string.
         case toolCall(id: String, name: String, argumentsJSON: String)
-        /// The app's answer to a tool call.
-        case toolResult(id: String, text: String, isError: Bool)
+        /// The app's answer to a tool call — optionally with an image (a screenshot
+        /// a tool took), encoded JPEG/PNG bytes.
+        case toolResult(id: String, text: String, isError: Bool, image: Data? = nil)
     }
     var role: AIRole
     var parts: [Part]
@@ -52,7 +53,7 @@ nonisolated struct AIRequest: Sendable {
     var tools: [AIToolSpec] = []
     /// Provider model id; nil = the adapter's default.
     var model: String? = nil
-    var maxTokens: Int = 4096
+    var maxTokens: Int = 16384   // streaming, so a large cap is safe; adaptive thinking eats into it
     /// Reasoning depth hint; adapters that have no such knob ignore it.
     var effort: AIEffort? = nil
     /// For the "what was sent" log only — never sent to the provider.

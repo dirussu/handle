@@ -83,6 +83,8 @@ final class NotchController {
     var onOpenSaved: (String) -> Void = { _ in }
     /// New chat — the app swaps in a fresh blank conversation and opens it.
     var onNewChat: () -> Void = {}
+    /// Settings → Automations "Run now".
+    var onRunAutomation: (Automation) -> Void = { _ in }
     /// Stop — cancel the running turn (send button becomes Stop while working).
     var onStop: () -> Void = {}
 

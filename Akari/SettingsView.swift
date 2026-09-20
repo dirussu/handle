@@ -66,6 +66,7 @@ struct SettingsBody: View {
             AISection()
             SentSection()
             SeeSection()
+            TasksSection()
 
             Section {
                 LabeledContent("Capture") {
@@ -113,6 +114,9 @@ private struct AISection: View {
     @State private var serverVision: Bool = AIConfig.openAISupportsVision
     @State private var fetched: [String] = []
     @State private var fetchStatus: String? = nil
+    @State private var webSearch: Bool = WebSettings.searchEnabled
+    @State private var maxSteps: Int = AgentSettings.maxSteps
+    @State private var turnBudget: Double = AgentSettings.turnBudgetUSD
 
     var body: some View {
         Section {
@@ -192,6 +196,22 @@ private struct AISection: View {
             if engine.sessionUsage != .init() {
                 LabeledContent("This session") {
                     Text(usageText).foregroundStyle(.secondary)
+                }
+            }
+            if kind == .anthropic {
+                Toggle("Let the model search the web", isOn: $webSearch)
+                    .onChange(of: webSearch) { _, v in WebSettings.searchEnabled = v }
+            }
+            // Agent limits (ASSISTANT.md): visible budgets, never silent stops.
+            Stepper("Max steps per turn: \(maxSteps)", value: $maxSteps, in: 5...100, step: 5)
+                .onChange(of: maxSteps) { _, v in AgentSettings.setMaxSteps(v) }
+            LabeledContent("Budget per turn") {
+                HStack(spacing: 6) {
+                    TextField("", value: $turnBudget, format: .number.precision(.fractionLength(2)))
+                        .textFieldStyle(.roundedBorder).frame(width: 80).multilineTextAlignment(.trailing).labelsHidden()
+                        .onSubmit { AgentSettings.setTurnBudget(turnBudget) }
+                        .onChange(of: turnBudget) { _, v in AgentSettings.setTurnBudget(v) }
+                    Text("USD · 0 = no limit").foregroundStyle(.secondary)
                 }
             }
         } header: {
@@ -361,6 +381,64 @@ private struct SeeSection: View {
     }
 }
 
+/// Background agent runs + the kill switch (ASSISTANT.md phase 5).
+private struct TasksSection: View {
+    @ObservedObject private var ledger = TaskLedger.shared
+    @State private var expanded: Set<String> = []
+
+    var body: some View {
+        Section {
+            if ledger.entries.isEmpty {
+                SettingsEmptyState(icon: "clock.badge.checkmark", title: "No background tasks yet",
+                                   hint: "Ask for something long and Akari can run it in the background; results land under the notch and here.")
+            } else {
+                ForEach(ledger.entries) { e in
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 8) {
+                            Image(systemName: icon(e.status)).font(.system(size: 12)).foregroundStyle(.secondary).frame(width: 16)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(e.goal).font(.body).lineLimit(1)
+                                Text(detail(e)).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                            }
+                            Spacer()
+                            if e.result != nil {
+                                Button(expanded.contains(e.id) ? "Hide" : "Show") {
+                                    if expanded.contains(e.id) { expanded.remove(e.id) } else { expanded.insert(e.id) }
+                                }.buttonStyle(.akariSolid)
+                            }
+                        }
+                        if expanded.contains(e.id), let r = e.result {
+                            Text(r).font(.akariCaption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true).padding(.leading, 24)
+                        }
+                    }
+                }
+            }
+            HStack {
+                Button("Stop everything") {
+                    NotchController.shared.onStop()
+                    TaskLedger.shared.cancelAll()
+                }
+                .buttonStyle(.akariSolidDestructive)
+                Spacer()
+            }
+        } header: {
+            SettingsHeader(icon: "clock.badge.checkmark", title: "Background tasks")
+        } footer: {
+            Text("\"Stop everything\" cancels the current reply and every background task at its next step. Automations keep their own on/off switches above.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    private func icon(_ s: TaskLedger.Status) -> String {
+        switch s { case .running: return "circle.dotted"; case .done: return "checkmark.circle"; case .failed: return "exclamationmark.circle"; case .cancelled: return "xmark.circle" }
+    }
+    private func detail(_ e: TaskLedger.Entry) -> String {
+        var parts = [e.status.rawValue, e.started.formatted(date: .omitted, time: .shortened)]
+        if let c = e.costUSD, c > 0 { parts.append("≈ \(AICost.format(c))") }
+        return parts.joined(separator: " · ")
+    }
+}
+
 /// Manage saved automations — the visible, controllable side of the scheduler.
 /// Each row: name, its schedule, an enable/disable switch, and delete.
 private struct AutomationsSection: View {
@@ -382,8 +460,18 @@ private struct AutomationsSection: View {
                         VStack(alignment: .leading, spacing: 1) {
                             Text(a.name).font(.body)
                             Text(a.schedule?.describe ?? a.trigger?.describe ?? "manual only").font(.caption).foregroundStyle(.secondary)
+                            if a.routineGoal != nil {
+                                Text(((a.policy?.standingConsent ?? false) ? "May act without asking" : "Read-only") + (lastRuns[a.id].map { " · last run \($0)" } ?? ""))
+                                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                            }
                         }
                         Spacer()
+                        if a.routineGoal != nil {
+                            Toggle("May act", isOn: consentBinding(a)).controlSize(.mini).font(.caption)
+                                .help("Standing consent: this automation may take consequential actions without a card. Off = read-only; it says when something needs your OK.")
+                            Button("Run") { NotchController.shared.onRunAutomation(a) }
+                                .buttonStyle(.akariSolid).controlSize(.small)
+                        }
                         Toggle("", isOn: enabledBinding(a)).labelsHidden().controlSize(.mini)
                         Button {
                             editingID = editingID == a.id ? nil : a.id
@@ -427,6 +515,35 @@ private struct AutomationsSection: View {
                 .font(.caption).foregroundStyle(.secondary)
         }
         .onAppear { automations = AutomationStore.shared.automations }
+        .task { await loadLastRuns() }
+    }
+
+    @State private var lastRuns: [String: String] = [:]
+
+    private func loadLastRuns() async {
+        var out: [String: String] = [:]
+        for a in automations where a.routineGoal != nil {
+            if let r = await AuditLog.shared.lastRun(for: "routine:\(a.name)") {
+                let time = String(r.ts.dropFirst(11).prefix(5))
+                out[a.id] = "\(time) · \(r.outcome)" + (r.summary.hasPrefix("$") ? " · " + r.summary.split(separator: "·").first!.trimmingCharacters(in: .whitespaces) : "")
+            }
+        }
+        lastRuns = out
+    }
+
+    private func consentBinding(_ a: Automation) -> Binding<Bool> {
+        Binding(
+            get: { AutomationStore.shared.automations.first { $0.id == a.id }?.policy?.standingConsent ?? false },
+            set: { on in
+                if var u = AutomationStore.shared.automations.first(where: { $0.id == a.id }) {
+                    var p = u.policy ?? AgentPolicy()
+                    p.standingConsent = on
+                    u.policy = p
+                    AutomationStore.shared.replace(u)
+                    automations = AutomationStore.shared.automations
+                }
+            }
+        )
     }
 
     private func enabledBinding(_ a: Automation) -> Binding<Bool> {
