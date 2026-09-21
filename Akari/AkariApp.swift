@@ -1700,6 +1700,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { @MainActor in
                 if cmd == "__selftest__" { self?.runSelfTest() }
                 else if cmd == "__uishot__" { self?.renderUIShots() }
+                else if cmd.hasPrefix("__websearch__ ") {
+                    // Toggle the Settings → AI web-search switch from the harness.
+                    WebSettings.searchEnabled = cmd.hasSuffix(" on")
+                    agentLog.info("harness: websearch=\(WebSettings.searchEnabled)")
+                }
                 else if cmd.hasPrefix("__autoapprove__") { Self.debugAutoApprove = cmd.hasSuffix("on"); agentLog.info("harness: autoapprove=\(Self.debugAutoApprove)") }
                 else if cmd == "__seetest__" {
                     // Exclusion, live: put the FRONTMOST app on the list, try an
