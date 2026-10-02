@@ -3045,6 +3045,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         save(SettingsBody(), width: 560, height: 1500, to: "/tmp/handle_settings.png")
         save(SettingsCustomizePreview(), width: 560, height: 1500, to: "/tmp/handle_customize.png")
         save(ConnectStep(onContinue: {}).padding(24), width: 560, height: 440, to: "/tmp/handle_connect.png")
+
+        // README shots: the real conversation view with SAMPLE content (nothing from this Mac).
+        let chat = Conversation(chatWithApp: "")
+        chat.addUserMessage("What's on my calendar tomorrow?")
+        chat.addToolChip(name: "read_calendar_events", inputJSON: #"{"start_iso":"2026-10-06T00:00","end_iso":"2026-10-06T23:59"}"#,
+                         content: "3 events", isError: false, displaySummary: "3 event(s)")
+        chat.commitAssistantMessage("You have three things tomorrow:\n\n- **09:30** Design review, 45 minutes\n- **13:00** Lunch with Sam\n- **16:00** Dentist\n\nThe morning is free until the review.")
+        let card = Conversation(chatWithApp: "")
+        card.addUserMessage("Remind me to call the dentist tomorrow at 10")
+        card.pendingConfirmation = ConfirmationRequest(
+            title: "Create reminder?",
+            detailRows: [(label: "Title", value: "Call the dentist"), (label: "Due", value: "Tomorrow, 10:00")],
+            confirmLabel: "Approve", cancelLabel: "Cancel", isDestructive: false, onDecision: { _ in })
+        for (convo, path) in [(chat, "/tmp/handle_chat.png"), (card, "/tmp/handle_card.png")] {
+            save(ConversationContent(conversation: convo, onSubmit: { _ in }, onAddPDF: {}, onClose: {}, onStop: {}).padding(18),
+                 width: 600, height: 460, to: path)
+        }
     }
 
     /// Pure-logic checks — the parser (every wrapper) + candidate ranking/dedup.
