@@ -9,14 +9,14 @@ import ImageIO
 //   cloudprobe --tools "point at the back button"     (phase 1: tool-call streaming)
 //   cloudprobe --provider openai --base http://localhost:1234/v1 --model qwen2.5 "hi"   (phase 4)
 // Key: $ANTHROPIC_API_KEY / $OPENAI_API_KEY, else the Keychain item the app uses
-// (service com.dimarussu.Akari.providers, account anthropic|openai). Local servers need none.
+// (service com.dimarussu.Handle.providers, account anthropic|openai). Local servers need none.
 
 var args = Array(CommandLine.arguments.dropFirst())
 var imagePath: String?
 var withTools = false
 var providerName = "anthropic"
 var baseURL: String? = nil
-var model: String? = ProcessInfo.processInfo.environment["AKARI_MODEL"]
+var model: String? = ProcessInfo.processInfo.environment["HANDLE_MODEL"]
 while let flag = args.first, flag.hasPrefix("--") {
     args.removeFirst()
     switch flag {

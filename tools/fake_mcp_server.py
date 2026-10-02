@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Dependency-free fake MCP server for Akari's __mcptest__ harness.
+"""Dependency-free fake MCP server for Handle's __mcptest__ harness.
 
 Speaks newline-delimited JSON-RPC over stdio (the MCP stdio transport) and
 implements the minimum surface: initialize, tools/list (echo / save_note /
@@ -35,7 +35,7 @@ for line in sys.stdin:
         send({"jsonrpc": "2.0", "id": mid, "result": {
             "protocolVersion": pv,
             "capabilities": {"tools": {}},
-            "serverInfo": {"name": "akari-fake-server", "version": "1.0"},
+            "serverInfo": {"name": "handle-fake-server", "version": "1.0"},
         }})
     elif method == "tools/list":
         # THREE tools so the routing path (prefilter -> select-by-index) has a

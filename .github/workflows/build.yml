@@ -14,7 +14,7 @@ jobs:
         run: sudo xcode-select -s /Applications/Xcode_26.app || sudo xcode-select -s "$(ls -d /Applications/Xcode*.app | sort -V | tail -1)"
       - name: Build (Debug, unsigned)
         run: |
-          xcodebuild -project Akari.xcodeproj -scheme Akari -configuration Debug \
+          xcodebuild -project Handle.xcodeproj -scheme Handle -configuration Debug \
             -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY="" build \
-            | grep -E "error:|warning: .*Akari/|BUILD" || true
+            | grep -E "error:|warning: .*Handle/|BUILD" || true
           test "${PIPESTATUS[0]}" -eq 0

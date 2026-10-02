@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""A tiny OpenAI-compatible server for testing Akari's OpenAI adapter with no key
+"""A tiny OpenAI-compatible server for testing Handle's OpenAI adapter with no key
 and no model: streams the real Chat Completions wire format.
 
   GET  /v1/models                    -> two fake ids
@@ -62,7 +62,7 @@ class H(BaseHTTPRequestHandler):
             chunk({"id": cid, "choices": [{"index": 0, "delta": {"tool_calls": [{"index": 0, "function": {"arguments": '{"start_iso": "2026-09-22T00:00:00+02:00", '}}]}}]})
             chunk({"id": cid, "choices": [{"index": 0, "delta": {"tool_calls": [{"index": 0, "function": {"arguments": '"end_iso": "2026-09-22T23:59:59+02:00"}'}}]}, "finish_reason": "tool_calls"}]})
         else:
-            # No digits in the canned text: Akari's recipe/MCP select prompts parse an
+            # No digits in the canned text: Handle's recipe/MCP select prompts parse an
             # index out of the reply, and "0" would look like a pick.
             yn = lambda b: "yes" if b else "no"
             reply = "FAKE reply (system prompt: %s; image attached: %s; tools offered: %s" % (yn(system_len), yn(image_bytes), yn(tools))

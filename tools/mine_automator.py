@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 """
-Mine steipete/macos-automator-mcp's knowledge_base into Akari recipe .md files
+Mine steipete/macos-automator-mcp's knowledge_base into Handle recipe .md files
 (the recipes-200+ pass; raycast/script-commands was the first source — see
 mine_raycast.py for the target format documentation).
 
 KB entry format: YAML frontmatter (title, id, description, keywords list,
 language, `parameters: >` free-text "- name (required): prompt" lines, notes)
 + a markdown body with ```applescript fences. Placeholders in the code are
-`--MCP_INPUT:name` or `${name}` — both become Akari's `${name}`.
+`--MCP_INPUT:name` or `${name}` — both become Handle's `${name}`.
 
 Policy (quality over quantity, same as the raycast pass):
   - action categories only (04–13, minus 11_advanced) — 01/02/03 are tutorials
     and JXA, not user automations.
-  - `language: applescript` only (Akari runs AppleScript, not JXA).
+  - `language: applescript` only (Handle runs AppleScript, not JXA).
   - first ```applescript fence is the body; entries whose body defines only
     handlers (no top-level statements) are documentation, not recipes → skip.
   - self-consistency: every ${x} in the body gets a param — from the
@@ -154,7 +154,7 @@ def convert(path, repo_root):
     script = re.sub(r'--MCP_INPUT:([A-Za-z_][A-Za-z0-9_]*)', r'${\1}', script)
 
     # `on run {a, b}` bodies REJECT argument-less execution (osascript: "{}
-    # doesn't match the parameters" — smoke-tested), and Akari always runs
+    # doesn't match the parameters" — smoke-tested), and Handle always runs
     # recipes argument-less. Rewrite the header to `set a to missing value`
     # assignments — the KB's own fallback branches (`if a is missing value
     # then set a to "${a}"`) then pick up the substituted values — and drop

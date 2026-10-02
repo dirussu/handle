@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Curate mined recipe .md files into a vetted subset fit for Akari's live library.
+Curate mined recipe .md files into a vetted subset fit for Handle's live library.
 
 Policy (PRODUCT.md #17 — recipes must be reliable on THIS Mac, not just valid):
   1. app-missing   — drop recipes that `tell application` / `open -a/-b` an app

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Compile-validate recipe .md files: substitute dummy params exactly the way
-Akari's Recipe.resolve does (raw substitution — string templates carry their
+Handle's Recipe.resolve does (raw substitution — string templates carry their
 own quotes), then `osacompile` the body. Compilation only, never execution.
 Failing files are MOVED to <dir>/_invalid/ with the compiler error appended
 as a trailing comment, so the pipeline stays inspectable.

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Mine raycast/script-commands (.applescript) into Akari recipe .md files.
+Mine raycast/script-commands (.applescript) into Handle recipe .md files.
 
-Akari's recipe format (see Recipe.swift / RecipeFile.parse):
+Handle's recipe format (see Recipe.swift / RecipeFile.parse):
     ---
     id: <slug>
     title: <title>
@@ -16,7 +16,7 @@ Akari's recipe format (see Recipe.swift / RecipeFile.parse):
 Raycast format: a `#`-comment header block of `@raycast.*` directives, then AppleScript
 whose args arrive as either `on run argv` + `item N of argv`, or `on run {named,...}`,
 or no args at all. We rewrite arg references to quoted `${param}` placeholders — quoted
-because Akari substitutes string params RAW (the quotes must live in the template).
+because Handle substitutes string params RAW (the quotes must live in the template).
 
 Emits ONLY recipes that pass a self-consistency check (every ${x} has a param, every
 param is used); everything else is skipped with a logged reason. Quality over quantity.
@@ -83,7 +83,7 @@ def keywords_for(meta, title):
     return words[:8]
 
 def param_type(argspec):
-    """Map a raycast argument spec → (akari-type-string, prompt)."""
+    """Map a raycast argument spec → (handle-type-string, prompt)."""
     if not isinstance(argspec, dict):
         return "string", "value"
     placeholder = argspec.get("placeholder") or argspec.get("name") or "value"

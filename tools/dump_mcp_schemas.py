@@ -5,7 +5,7 @@ Spawns each server over stdio (newline-delimited JSON-RPC), completes the
 initialize handshake, calls tools/list, and writes everything to
 tools/mcp_schemas.json. The schemas feed the 4B fill eval (EVALS.md): the
 eval must run against what servers ACTUALLY publish, not hand-written
-approximations. Dev-time tool — Akari itself never downloads anything.
+approximations. Dev-time tool — Handle itself never downloads anything.
 """
 import json
 import os
@@ -60,7 +60,7 @@ def dump(name, argv):
         rpc(proc, {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
             "protocolVersion": "2025-03-26",
             "capabilities": {},
-            "clientInfo": {"name": "akari-schema-dump", "version": "1.0"},
+            "clientInfo": {"name": "handle-schema-dump", "version": "1.0"},
         }})
         init = read_response(proc, 1)
         rpc(proc, {"jsonrpc": "2.0", "method": "notifications/initialized"})
