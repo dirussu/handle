@@ -51,7 +51,10 @@ final class ConversationTests: AppTestCase {
         check("storage override honored", ModelStorage.base.path == "/Volumes/Ext/huggingface")
         if let storedBase { UserDefaults.standard.set(storedBase, forKey: "handle.models.base") }
         else { UserDefaults.standard.removeObject(forKey: "handle.models.base") }
-        check("storage size readable", !ModelStorage.sizeDescription().isEmpty)   // 3.6 GB of models on this Mac
+        // The size is only reported once a speech model has been downloaded.
+        if FileManager.default.fileExists(atPath: ModelStorage.base.path) {
+            check("storage size readable", !ModelStorage.sizeDescription().isEmpty)
+        }
     }
 
     func testVoice() {

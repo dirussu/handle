@@ -151,7 +151,10 @@ final class AgentLoopTests: AppTestCase {
 
     func testRepeatGuardSignature() {
         check("sig identical args", AppDelegate.callSignature(name: "t", args: ["a": "X"]) == AppDelegate.callSignature(name: "t", args: ["a": "X"]))
-        check("sig date forms match", AppDelegate.callSignature(name: "t", args: ["start_iso": "2026-07-15T00:00:00+02:00"]) == AppDelegate.callSignature(name: "t", args: ["start_iso": "2026-07-15T00:00"]))
+        // A local time with no zone and the same instant written with this machine's UTC offset must match.
+        let seconds = TimeZone.current.secondsFromGMT(for: CalendarTools.parseDate("2026-07-15T00:00") ?? Date())
+        let offset = String(format: "%@%02d:%02d", seconds < 0 ? "-" : "+", abs(seconds) / 3600, abs(seconds) % 3600 / 60)
+        check("sig date forms match", AppDelegate.callSignature(name: "t", args: ["start_iso": "2026-07-15T00:00:00\(offset)"]) == AppDelegate.callSignature(name: "t", args: ["start_iso": "2026-07-15T00:00"]))
         check("sig different dates differ", AppDelegate.callSignature(name: "t", args: ["start_iso": "2026-07-15T00:00"]) != AppDelegate.callSignature(name: "t", args: ["start_iso": "2026-07-16T00:00"]))
         check("sig case/space normalized", AppDelegate.callSignature(name: "t", args: ["q": " Mary "]) == AppDelegate.callSignature(name: "t", args: ["q": "mary"]))
         check("sig name matters", AppDelegate.callSignature(name: "a", args: [:]) != AppDelegate.callSignature(name: "b", args: [:]))
