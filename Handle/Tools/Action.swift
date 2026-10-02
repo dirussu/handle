@@ -70,7 +70,7 @@ struct ActionRequest: Hashable {
     }
 }
 
-/// Prompt templates. (The old cloud-era `system` prompt was removed 2026-09-19 —
+/// Prompt templates. (The old cloud-era `system` prompt was removed —
 /// the system prompt now lives in `AgentPrompting.identity` + the loop's rules.)
 enum Prompts {
     static func userMessage(

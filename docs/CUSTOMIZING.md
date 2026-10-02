@@ -128,6 +128,6 @@ turns are in Settings → AI.
   the loop as `mcp__<server>__<tool>`, always behind a card. Settings → Integrations.
 - **Recipes.** `recipes/*.md` are hand-verified AppleScript automations with parameters; the
   matching ones are offered to the model as `run_recipe`. Copy an existing file to add your own.
-- **The code.** Built-in tools are `Tool` values in `Handle/*Tools.swift`, registered in
-  `ToolRegistry.swift`; the loop is `runAgentLoop` in `HandleApp.swift`. `ASSISTANT.md` explains
-  the loop's design and its limits.
+- **The code.** Built-in tools are `Tool` values in `Handle/Tools/`, registered in
+  `ToolRegistry.swift`. The loop is `runAgentLoop` in `Handle/Agent/AgentLoop.swift`, and
+  `ASSISTANT.md` explains its design and its limits.

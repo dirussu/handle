@@ -115,23 +115,25 @@ preselected.
 
 ## How it's built
 
-Swift 6 and SwiftUI, one Xcode project, no backend. The interesting parts:
+Swift 6 and SwiftUI, one Xcode project, no backend. The source is organised by area:
 
-- `Handle/HandleApp.swift`: the agent loop. One `runAgentLoop` serves user turns,
-  sub-agents, routines and background tasks; a policy (allowed tools, step cap, budget,
-  standing consent, depth) decides what each run may do.
-- `Handle/AI/`: the provider layer, with `AnthropicProvider` (Messages API, streaming, prompt
-  caching, adaptive thinking), `OpenAIProvider` (Chat Completions, custom base URL),
-  `CloudEngine` (turns, usage, "what was sent"), `AgentPrompting`, `AgentPolicy`.
-- `Handle/*Tools.swift` and `ToolRegistry.swift`: the built-in tools. `ScreenTools` is the
-  hands-and-eyes set, and `UserTools.swift` loads yours.
-- `Handle/MCPService.swift`: the MCP client (stdio servers from `mcp.json`, Keychain-backed
-  secrets). Their tools join the loop as native tools.
-- `Handle/Recipe.swift`: the recipe library (parameterized, hand-verified AppleScript;
-  built-ins plus `~/Library/Application Support/Handle/recipes/*.md`), offered to the model
-  as `run_recipe`.
-- `Handle/Automation.swift`, `TriggerEngine.swift`, `TaskLedger.swift`, `AuditLog.swift`:
-  schedules, event triggers, the running-task ledger with a kill switch, and the audit log.
+| Folder | What lives there |
+|---|---|
+| `Handle/App` | App entry, hotkeys, voice, screen capture, permissions |
+| `Handle/Agent` | The agent loop, a single model turn, confirmation cards, pointing |
+| `Handle/AI` | Providers (Anthropic and OpenAI-compatible), usage and cost, consent settings |
+| `Handle/Tools` | The built-in tools and their registry. `UserTools.swift` loads yours. |
+| `Handle/Automations` | Recipes, saved automations, schedules, triggers, the task ledger |
+| `Handle/Screen` | Capture, OCR, accessibility reads, the pointer overlay |
+| `Handle/Notch` | The notch interface: conversation, chats list, onboarding |
+| `Handle/Settings` | One file per Settings section |
+| `Handle/Storage` | Conversations, memory, the audit log |
+| `Handle/Services` | The MCP client and speech transcription |
+| `Handle/Debug` | Debug builds only: the self-tests and the terminal hook |
+
+The centre of it is `runAgentLoop` in `Handle/Agent/AgentLoop.swift`. The same loop serves
+chat turns, sub-agents, routines and background tasks, and a policy (allowed tools, step
+cap, budget, standing consent, depth) decides what each run may do.
 
 More in [`docs/`](docs): [what Handle is and why](docs/PRODUCT.md), [the model
 layer](docs/PROVIDERS.md), [the agent loop and its limits](docs/ASSISTANT.md),

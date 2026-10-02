@@ -1,6 +1,6 @@
 import Foundation
 
-/// The providers a user can pick. There is NO default (2026-09-19):
+/// The providers a user can pick. There is NO default :
 /// nothing is preselected in onboarding and the app never switches on its own.
 nonisolated enum AIProviderKind: String, CaseIterable, Identifiable, Sendable {
     case anthropic

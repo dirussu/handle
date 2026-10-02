@@ -110,22 +110,6 @@ final class MetaballPointer {
         }
     }
 
-    /// TEMP — demo trigger (⌘⌥P) so the spit-out can be felt without the model.
-    /// Prefer the open panel's screen so it spits from the open panel's bottom
-    /// edge (even if the cursor is elsewhere); otherwise use the cursor's screen.
-    func demo() {
-        let screen = NotchController.shared.openPanelScreen() ?? PointingOverlay.currentScreen()
-        let cx = screen.frame.width / 2, h = screen.frame.height
-        present(steps: [
-            GuideStep(rect: CGRect(x: cx - 220, y: 150, width: 200, height: 54),
-                      message: "This is the command bar — type here to do anything."),
-            GuideStep(rect: CGRect(x: cx - 235, y: 300, width: 150, height: 230),
-                      message: "Your navigation lives down the side."),
-            GuideStep(rect: CGRect(x: cx - 220, y: h - 280, width: 440, height: 250),
-                      message: "And this is the main canvas — note the bubble flips above here."),
-        ], on: screen)
-    }
-
     private func clear() {
         hideTask?.cancel()
         hideTask = nil

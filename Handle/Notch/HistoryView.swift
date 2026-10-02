@@ -221,7 +221,7 @@ private struct HistoryRow: View {
                         .foregroundStyle(.white.opacity(0.92))
                         .lineLimit(1)
                     // Last exchange, one dim line — recognition beats recall
-                    // when scanning (history pass, 2026-07-10).
+                    // when scanning (history pass).
                     if !summary.preview.isEmpty {
                         Text(summary.preview)
                             .font(.handleCaption)
@@ -259,7 +259,7 @@ private struct HistoryRow: View {
     }
 
     // Just the relative time — app name and turn count were noise
-    // (2026-07-10); the preview line above carries the recognition load.
+    // ; the preview line above carries the recognition load.
     private var subtitle: String {
         Self.rel.localizedString(for: summary.updatedAt, relativeTo: Date())
     }

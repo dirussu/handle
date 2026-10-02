@@ -235,7 +235,7 @@ enum MCPRoute {
     /// no-hijack property, below it the goal falls through to freeform. But
     /// once entered, WEAK candidates (score ≥1) join the list too: tool names
     /// rarely match action-phrased goals ("what's inside X" never says
-    /// "list_directory" — the real filesystem server, 2026-07-10), and
+    /// "list_directory" — the real filesystem server), and
     /// select-by-index disambiguation is the model's proven strength.
     static func prefilter(_ goal: String, tools: [MCPToolInfo], limit: Int = 5) -> [MCPToolInfo] {
         let goalTokens = Set(tokens(goal))

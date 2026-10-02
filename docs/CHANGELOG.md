@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Removed a leftover demo shortcut that claimed ⌘⌥P system-wide.
+- Source reorganised by area. The app delegate and the Settings view are split into focused files.
+
 ## 1.0.1 (2 October 2026)
 
 - New app icon.

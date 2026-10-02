@@ -118,7 +118,7 @@ struct BorderComet<S: Shape>: View {
     /// The comet rides the shape's BORDER, so half its stroke and all of its
     /// outer glow live OUTSIDE the given bounds — and a Canvas clips to its
     /// bounds, which swallowed the outer bloom around curves (seen in a
-    /// screenshot, 2026-07-10: "hides behind something"). The canvas extends
+    /// screenshot: "hides behind something"). The canvas extends
     /// past the slot by this much; the path is drawn inset back to the
     /// original geometry, so the border lands exactly where it always did.
     private let overscan: CGFloat = 12

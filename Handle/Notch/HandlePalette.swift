@@ -4,7 +4,7 @@ import SwiftUI
 //
 // SwiftUI's TextField bridges to NSTextField, whose macOS focus ring draws a
 // thick gray halo that reads as damage on Handle's black surface (seen in a
-// screenshot, 2026-07-10) — and `.focusEffectDisabled()` doesn't reach the
+// screenshot) — and `.focusEffectDisabled()` doesn't reach the
 // bridged AppKit ring. One override kills it everywhere; focus itself (cursor,
 // keyboard navigation) is untouched.
 extension NSTextField {

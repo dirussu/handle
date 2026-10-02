@@ -123,7 +123,7 @@ enum ScreenTools {
     }
 
     /// Keystrokes go to whatever is in front, so the caller names the app it means and
-    /// nothing is sent when another one is there. (Seen live 2026-10-02: text meant for
+    /// nothing is sent when another one is there. (Seen live: text meant for
     /// TextEdit landed in a chat window the user had switched to.)
     static func requireFront(_ app: String) throws {
         let front = NSWorkspace.shared.frontmostApplication

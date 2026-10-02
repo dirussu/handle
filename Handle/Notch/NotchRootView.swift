@@ -582,7 +582,7 @@ private struct NotificationCenterView: View {
 }
 
 /// The capsule that folds the notification stack. Hover = the chevron turns
-/// white, nothing else (2026-07-10: the fill/stroke lift read as
+/// white, nothing else (the fill/stroke lift read as
 /// "glass" — too much). Idle sits at 0.55 so the white step is visible.
 private struct CollapseHandle: View {
     let reduce: Bool
