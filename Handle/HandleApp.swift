@@ -2204,6 +2204,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Recipe engine (Phase 1 prototype — see AGENTS.md)
 
+    #endif
     /// One text-only model turn → the reply string.
     private func askModel(_ prompt: String) async -> String {
         var out = ""
@@ -2401,6 +2402,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return [:]
     }
 
+    #if DEBUG
     /// Does a filled MCP argument match an eval expectation? Expectation forms:
     /// scalar = exact (strings ci/trimmed, numbers numeric), {"any": [...]} =
     /// any of these, {"contains": "x"} = ci substring, array = element-wise.
@@ -2468,6 +2470,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         agentLog.info("mcpfilleval DONE: values \(values)/\(cases.count), strict \(strict)/\(cases.count)")
     }
 
+    #endif
     /// Repeat-guard signature: tool name + NORMALIZED args. Byte-identical
     /// comparison missed real repeats (founder repro, 2026-07-10: the 4B's
     /// first call carried "+02: soul" — corrupted text inside the timezone
@@ -2493,6 +2496,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return Int(s[r])
     }
 
+    #if DEBUG
     /// RECIPE PROBE (`__recipe__ <goal>`): match → fill → resolve, logging each stage
     /// (no execution) to validate retrieve+fill on the real model.
     private func runRecipeProbe(goal: String) async {
@@ -2508,6 +2512,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         agentLog.info("recipe: CARD=\"\(card, privacy: .public)\"\nrecipe: RESOLVED SCRIPT:\n\(script, privacy: .public)")
     }
 
+    #endif
     /// `run_recipe` — a recipe as a loop tool: the candidates for this request are
     /// listed in the turn prefix (`recipeCandidatesLine`); the model calls with an id
     /// and params; the same card/AppleScript/chip/audit path as before runs it.
@@ -2895,6 +2900,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         TriggerEngine.shared.refresh()
     }
 
+    #if DEBUG
     /// PERMISSIONS TEST (`__permstest__`): log every TCC status non-interactively
     /// (Automation checked against Finder + System Events, no dialogs).
     private func runPermsTest() async {
@@ -2934,6 +2940,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         agentLog.info("trigtest: watching \(dir, privacy: .public) for .png — drop a file to fire")
     }
 
+    #endif
     /// Once-a-tick scheduler: run any enabled automation whose time is due (deduped per
     /// minute via `lastRunKey`). Started on launch.
     private func startScheduler() {
@@ -2960,6 +2967,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    #if DEBUG
     /// SCHEDULER TEST (`__schedtest__`): save a "set volume to 12" automation firing ~70s
     /// out (no card) and let the live scheduler pick it up — validates the tick loop.
     private func runSchedTest() {

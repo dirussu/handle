@@ -18,3 +18,9 @@ jobs:
             -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY="" build \
             | grep -E "error:|warning: .*Handle/|BUILD" || true
           test "${PIPESTATUS[0]}" -eq 0
+      - name: Build (Release, unsigned)
+        run: |
+          xcodebuild -project Handle.xcodeproj -scheme Handle -configuration Release \
+            -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY="" build \
+            | grep -E "error:|warning: .*Handle/|BUILD" || true
+          test "${PIPESTATUS[0]}" -eq 0
