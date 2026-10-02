@@ -163,13 +163,6 @@ enum MCPConfig {
     }
 }
 
-/// The NL→arguments fill step for MCP tools (increment ② — the recipe
-/// pipeline's `fillParams`, generalized to real JSON-Schema). Pure functions:
-/// condense a tool's inputSchema into the flat param spec the 4B can fill
-/// from, and build the fill prompt — WORKED EXAMPLES + when-X-do-Y framing
-/// (the house rule: abstract instructions fail on the 4B; proven twice).
-/// Prompt quality is eval-gated: `__mcpfilleval__` runs real dumped schemas
-/// (tools/mcp_schemas.json) against the live model.
 /// Secrets for MCP servers (increment ③). mcp.json stays claude-desktop
 /// compatible, but an env VALUE of the form `keychain:NAME` is resolved from
 /// the macOS Keychain at spawn time — the token itself never sits in the
@@ -216,109 +209,8 @@ struct MCPToolInfo {
     let schema: [String: Any]
 }
 
-/// Routing MCP tools into the recipe pipeline: the keyword prefilter that
-/// decides which tools the model gets to pick from (select-by-index — the
-/// model NEVER sees the full tool list, per the load-bearing rule).
-enum MCPRoute {
-    static let stopwords: Set<String> = ["the", "a", "an", "in", "on", "at", "to", "of", "my",
-                                         "me", "and", "or", "for", "with", "it", "is", "this",
-                                         "that", "please", "can", "you", "use", "using"]
-
-    static func tokens(_ s: String) -> [String] {
-        s.lowercased().components(separatedBy: CharacterSet.alphanumerics.inverted)
-            .filter { $0.count >= 2 && !stopwords.contains($0) }
-    }
-
-    /// Score = 3 per goal-token hit on the tool's NAME tokens + 1 per hit in
-    /// its description. ENTERING the stage requires one strong candidate
-    /// (score ≥3: a name hit, or several description hits) — that's the
-    /// no-hijack property, below it the goal falls through to freeform. But
-    /// once entered, WEAK candidates (score ≥1) join the list too: tool names
-    /// rarely match action-phrased goals ("what's inside X" never says
-    /// "list_directory" — the real filesystem server), and
-    /// select-by-index disambiguation is the model's proven strength.
-    static func prefilter(_ goal: String, tools: [MCPToolInfo], limit: Int = 5) -> [MCPToolInfo] {
-        let goalTokens = Set(tokens(goal))
-        guard !goalTokens.isEmpty else { return [] }
-        let scored = tools.compactMap { tool -> (MCPToolInfo, Int)? in
-            let nameTokens = Set(tokens(tool.name))
-            let descTokens = Set(tokens(tool.description))
-            let score = goalTokens.intersection(nameTokens).count * 3
-                      + goalTokens.intersection(descTokens).count
-            return score >= 1 ? (tool, score) : nil
-        }
-        guard scored.contains(where: { $0.1 >= 3 }) else { return [] }
-        // Ties break by name so the candidate list is DETERMINISTIC run to run
-        // (Swift's sort isn't stable; a flaky list is an undebuggable eval).
-        return scored.sorted { $0.1 != $1.1 ? $0.1 > $1.1 : $0.0.name < $1.0.name }
-            .prefix(limit).map { $0.0 }
-    }
-}
-
-enum MCPFill {
-    /// "- path (string, required): the file path" — one line per property.
-    /// Enums render as the value list (the model must pick, not invent);
-    /// arrays name their element type. Long descriptions truncate at a word
-    /// boundary (~140 chars) — schema prose can run to paragraphs
-    /// (sequential-thinking) and would drown the 4B.
-    static func condenseSchema(_ schema: [String: Any]) -> String {
-        let props = schema["properties"] as? [String: Any] ?? [:]
-        let required = Set(schema["required"] as? [String] ?? [])
-        return props.keys.sorted().map { name -> String in
-            let p = props[name] as? [String: Any] ?? [:]
-            var kind = p["type"] as? String ?? "string"
-            if let values = p["enum"] as? [Any] {
-                kind = "one of: " + values.map { "\($0)" }.joined(separator: " | ")
-            } else if kind == "array" {
-                let item = (p["items"] as? [String: Any])?["type"] as? String ?? "string"
-                kind = "list of \(item)"
-            }
-            let flag = required.contains(name) ? ", required" : ""
-            var desc = (p["description"] as? String ?? p["title"] as? String ?? "")
-                .replacingOccurrences(of: "\n", with: " ")
-            if desc.count > 140 {
-                desc = String(desc.prefix(140))
-                if let cut = desc.range(of: " ", options: .backwards) { desc = String(desc[..<cut.lowerBound]) }
-                desc += "…"
-            }
-            return "- \(name) (\(kind)\(flag))" + (desc.isEmpty ? "" : ": \(desc)")
-        }.joined(separator: "\n")
-    }
-
-    /// The fill prompt. Two worked examples carry the rules the 4B won't take
-    /// abstractly: values come from the user's words (typed correctly), and
-    /// optional arguments the user didn't mention are LEFT OUT.
-    static func prompt(goal: String, toolName: String, description: String, schema: [String: Any]) -> String {
-        var desc = description.replacingOccurrences(of: "\n", with: " ")
-        if desc.count > 200 { desc = String(desc.prefix(200)) + "…" }
-        return """
-        Fill in the arguments for a tool call. Reply with ONLY a JSON object mapping each \
-        argument name to its value. Take values from the user's request — text as a string, \
-        a number as a number, true/false as a boolean. Include every required argument. \
-        When the user didn't mention an optional argument, LEAVE IT OUT.
-
-        Example — the user wants "play Hey Jude by the Beatles", the tool play_song takes:
-        - artist (string): the artist name
-        - title (string, required): the song title
-        Reply: {"title": "Hey Jude", "artist": "The Beatles"}
-
-        Example — the user wants "show the 3 newest photos", the tool list_photos takes:
-        - count (number): how many to show
-        - folder (string): only this album
-        Reply: {"count": 3}
-
-        Now the user wants: "\(goal)"
-        The tool \(toolName)\(desc.isEmpty ? "" : " — \(desc)") takes:
-        \(condenseSchema(schema))
-        Reply:
-        """
-    }
-}
-
-/// This file is the transport + lifecycle layer: config, connect, list tools,
-/// call a tool, crash recovery, disconnect — proven by the `__mcptest__`
-/// harness against `tools/fake_mcp_server.py`. Recipe-engine routing, Keychain
-/// tokens, and Settings UI are the next increments.
+/// The MCP client: reads the server config, starts servers on demand, lists their tools,
+/// calls them, restarts a server that crashed, and shuts everything down on quit.
 @MainActor
 final class MCPService {
     static let shared = MCPService()
