@@ -4,6 +4,8 @@
 
 - Removed a leftover demo shortcut that claimed ⌘⌥P system-wide.
 - Source reorganised by area. The app delegate and the Settings view are split into focused files.
+- Unit tests moved out of the app into their own test target, and run on every push.
+- Removed an unused connector-routing path and its evaluation data.
 
 ## 1.0.1 (2 October 2026)
 

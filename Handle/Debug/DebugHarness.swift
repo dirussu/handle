@@ -7,12 +7,9 @@ import OSLog
 #if DEBUG
 
 extension AppDelegate {
-    //
-    // Lets the edit→build→test loop run WITHOUT driving the GUI. Poll a command
-    // file: write a pointing query → the pipeline runs against the frontmost app
-    // and the dispatch logs the selected element + live frame; write "__selftest__"
-    // → pure-logic checks (parser + ranking) log PASS/FAIL. Read outcomes from the
-    // unified log (subsystem com.dimarussu.Handle, category Agent). DEBUG-only.
+    // A command hook for driving the app without touching its interface. The app polls a
+    // command file; each command runs one path (a full turn, a routine, a UI render) and
+    // logs the outcome to the unified log (subsystem com.dimarussu.Handle, category Agent).
 
     static let testCmdPath = "/tmp/handle_test_cmd"
 
@@ -26,8 +23,7 @@ extension AppDelegate {
             let cmd = raw.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !cmd.isEmpty else { return }
             Task { @MainActor in
-                if cmd == "__selftest__" { self?.runSelfTest() }
-                else if cmd == "__uishot__" { self?.renderUIShots() }
+                if cmd == "__uishot__" { self?.renderUIShots() }
                 else if cmd.hasPrefix("__websearch__ ") {
                     // Toggle the Settings → AI web-search switch from the harness.
                     WebSettings.searchEnabled = cmd.hasSuffix(" on")
@@ -209,7 +205,6 @@ extension AppDelegate {
                     agentLog.info("trigbatchtest: DONE (want fires: window ×2, Standup ×1, lock ×1)")
                 }
                 else if cmd == "__permstest__" { await self?.runPermsTest() }
-                else if cmd == "__mcpfilleval__" { await self?.runMCPFillEval() }
                 else if cmd.hasPrefix("__routinesave__ ") {
                     // ROUTINE SAVE FLOW: the real turn path (parseSchedule → no
                     // recipe → routine card, auto-approved) on a throwaway convo.
@@ -283,42 +278,6 @@ extension AppDelegate {
                     }
                     MCPKeychain.delete(key)
                     agentLog.info("keychaintest: after delete get=\(MCPKeychain.get(key) ?? "nil", privacy: .public) (want nil) DONE")
-                }
-                else if cmd.hasPrefix("__mcproute__ ") {
-                    // MCP ROUTE PROBE: discovery → prefilter → select-by-index →
-                    // fill, logging each stage. NO execution (mirror of __recipe__).
-                    guard let self else { return }
-                    let goal = String(cmd.dropFirst("__mcproute__ ".count))
-                    let tools = await MCPService.shared.allConfiguredTools()
-                    let candidates = MCPRoute.prefilter(goal, tools: tools)
-                    agentLog.info("mcproute: \(tools.count) tool(s) discovered, \(candidates.count) candidate(s): \(candidates.map { "\($0.server).\($0.name)" }.joined(separator: ", "), privacy: .public)")
-                    if let (tool, args) = await self.matchAndFillMCPTool(goal: goal) {
-                        agentLog.info("mcproute: SELECTED \(tool.server, privacy: .public).\(tool.name, privacy: .public) args=\(String(describing: args), privacy: .public)")
-                    } else {
-                        agentLog.info("mcproute: NO MATCH — would fall through to freeform")
-                    }
-                }
-                else if cmd.hasPrefix("__mcprun__ ") {
-                    // MCP E2E: the REAL runMCPIfMatched on a throwaway conversation,
-                    // with the confirm card auto-approved (DEBUG harness only) —
-                    // proves match → fill → confirm → call → audit + chip live.
-                    guard let self else { return }
-                    let goal = String(cmd.dropFirst("__mcprun__ ".count))
-                    let convo = Conversation(chatWithApp: "MCPTest")
-                    let approver = Task { @MainActor in
-                        for _ in 0..<600 {   // model select+fill runs first; card can take a while
-                            if let req = convo.pendingConfirmation {
-                                agentLog.info("mcprun: card shown — auto-approving")
-                                req.onDecision(true); return
-                            }
-                            try? await Task.sleep(for: .milliseconds(100))
-                        }
-                    }
-                    let handled = await self.runMCPIfMatched(goal: goal, in: convo)
-                    approver.cancel()
-                    let last = convo.visibleMessages.last.map(\.text) ?? "-"
-                    let chip = convo.visibleMessages.compactMap { $0.toolUses.first?.name }.last ?? "-"
-                    agentLog.info("mcprun: handled=\(handled) chip=\(chip, privacy: .public) last=\"\(last, privacy: .public)\"")
                 }
                 else if cmd.hasPrefix("__mcpconnect__") {
                     // Connect a configured server and LEAVE it running — for
@@ -528,73 +487,6 @@ extension AppDelegate {
             agentLog.error("planprobe error: \(error.localizedDescription, privacy: .public)"); return
         }
         agentLog.info("planprobe PLAN for \"\(goal, privacy: .public)\":\n\(plan, privacy: .public)")
-    }
-
-    /// Does a filled MCP argument match an eval expectation? Expectation forms:
-    /// scalar = exact (strings ci/trimmed, numbers numeric), {"any": [...]} =
-    /// any of these, {"contains": "x"} = ci substring, array = element-wise.
-    /// Pure — covered in __selftest__; the model runs only in __mcpfilleval__.
-    static func mcpFillMatches(got: Any?, want: Any) -> Bool {
-        guard let got else { return false }
-        if let spec = want as? [String: Any] {
-            if let anyOf = spec["any"] as? [Any] { return anyOf.contains { mcpFillMatches(got: got, want: $0) } }
-            if let sub = spec["contains"] as? String {
-                return (got as? String)?.lowercased().contains(sub.lowercased()) ?? false
-            }
-            return false
-        }
-        if let wantList = want as? [Any] {
-            guard let gotList = got as? [Any], gotList.count == wantList.count else { return false }
-            return zip(gotList, wantList).allSatisfy { mcpFillMatches(got: $0, want: $1) }
-        }
-        if let w = want as? String, let g = got as? String {
-            return g.trimmingCharacters(in: .whitespaces).lowercased() == w.lowercased()
-        }
-        if let w = want as? NSNumber, let g = got as? NSNumber { return w == g }
-        return false
-    }
-
-    /// MCP FILL EVAL (`__mcpfilleval__`): every case in tools/mcp_fill_eval.json
-    /// against the REAL schemas in tools/mcp_schemas.json (dumped from live
-    /// community servers) on the live model. Two tiers per case: VALUES (every
-    /// expected argument filled correctly) and STRICT (values + no unrequested
-    /// optional arguments). Results belong in EVALS.md.
-    func runMCPFillEval() async {
-        let toolsDir = Self.repoToolsDir
-        guard let schemaData = FileManager.default.contents(atPath: toolsDir + "/mcp_schemas.json"),
-              let schemas = (try? JSONSerialization.jsonObject(with: schemaData)) as? [String: [[String: Any]]],
-              let evalData = FileManager.default.contents(atPath: toolsDir + "/mcp_fill_eval.json"),
-              let evalRoot = (try? JSONSerialization.jsonObject(with: evalData)) as? [String: Any],
-              let cases = evalRoot["cases"] as? [[String: Any]] else {
-            agentLog.error("mcpfilleval: cannot load tools/mcp_schemas.json + tools/mcp_fill_eval.json"); return
-        }
-        var values = 0, strict = 0
-        for c in cases {
-            guard let id = c["id"] as? String, let server = c["server"] as? String,
-                  let toolName = c["tool"] as? String, let goal = c["goal"] as? String,
-                  let expect = c["expect"] as? [String: Any],
-                  let tool = schemas[server]?.first(where: { ($0["name"] as? String) == toolName }),
-                  let schema = tool["inputSchema"] as? [String: Any] else {
-                agentLog.error("mcpfilleval: bad case or missing schema — \(String(describing: c["id"]), privacy: .public)"); continue
-            }
-            let prompt = MCPFill.prompt(goal: goal, toolName: toolName,
-                                        description: tool["description"] as? String ?? "", schema: schema)
-            let reply = await askModel(prompt)
-            var filled: [String: Any] = [:]
-            for json in jsonObjectCandidates(in: reply) {
-                if let d = json.data(using: .utf8),
-                   let obj = try? JSONSerialization.jsonObject(with: d) as? [String: Any] { filled = obj; break }
-            }
-            let wrong = expect.keys.filter { !Self.mcpFillMatches(got: filled[$0], want: expect[$0]!) }.sorted()
-            let extras = filled.keys.filter { expect[$0] == nil }.sorted()
-            let valueOK = wrong.isEmpty
-            let strictOK = valueOK && extras.isEmpty
-            if valueOK { values += 1 }
-            if strictOK { strict += 1 }
-            let verdict = strictOK ? "PASS" : (valueOK ? "PASS-values (extra: \(extras.joined(separator: ",")))" : "FAIL (wrong: \(wrong.joined(separator: ",")))")
-            agentLog.info("mcpfilleval \(id, privacy: .public) [\(server, privacy: .public).\(toolName, privacy: .public)]: \(verdict, privacy: .public) — filled=\(String(describing: filled), privacy: .public)")
-        }
-        agentLog.info("mcpfilleval DONE: values \(values)/\(cases.count), strict \(strict)/\(cases.count)")
     }
 
     /// RECIPE PROBE (`__recipe__ <goal>`): match → fill → resolve, logging each stage

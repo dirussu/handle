@@ -184,7 +184,7 @@ tester sees ambient capture; 4 after the abstraction has survived one real provi
 ## Status
 
 - **Phase 0 — DONE 2026-09-19.** BUILD SUCCEEDED on Xcode 27 / Swift 6.4, 0 warnings in
-  `Handle/AI`, `__selftest__` 306/306 (+9 for SSE + the Anthropic decoder). Live API turn
+  `Handle/AI`, 306/306 unit checks (+9 for SSE + the Anthropic decoder). Live API turn
   still unverified — no key on the dev Mac yet. Files: `Handle/AI/AIProvider.swift`,
   `SSE.swift`, `AnthropicProvider.swift`, `SecretStore.swift`, `AIConfig.swift`,
   `CloudEngine.swift`; switch points in `HandleApp.swift` (`streamOneTurn`, `askModel`,

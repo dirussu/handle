@@ -38,6 +38,6 @@ The original plan was *"vision points, AX pins"*: the model gives a rough (x,y);
 ## Testing without the GUI (DEBUG harness)
 The app watches `/tmp/handle_test_cmd`:
 - `echo "where is the back button" > /tmp/handle_test_cmd` → runs the full pipeline against the frontmost app; the dispatch logs the chosen element + frame.
-- `echo "__selftest__" > /tmp/handle_test_cmd` → pure-logic checks (parser, ranking) log PASS/FAIL — **no model load**, low RAM.
+- `xcodebuild test` runs the pure-logic checks (parser, ranking) — **no model load**, low RAM.
 
 Read results: `log stream --predicate 'subsystem == "com.dimarussu.Handle"' --level info`.

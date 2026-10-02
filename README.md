@@ -142,23 +142,31 @@ yours](docs/CUSTOMIZING.md), and the [changelog](docs/CHANGELOG.md).
 
 ## Testing
 
-The Debug build includes a self-test suite and a small command hook for driving the app
-from the terminal. With Handle running:
+Unit tests live in `HandleTests` and run from Xcode (⌘U) or the terminal:
 
 ```bash
-echo "__selftest__" > /tmp/handle_test_cmd
+xcodebuild test -project Handle.xcodeproj -scheme Handle -destination 'platform=macOS'
 ```
 
-Then watch the log:
+They cover the pure logic: tool-call parsing, the provider adapters, the agent loop's
+limits and consent rules, automations and triggers, storage, and the customization layer.
+
+For end-to-end checks, the Debug build has a small command hook that drives the running
+app from the terminal:
+
+```bash
+echo "__voicecmd__ what's on my calendar tomorrow" > /tmp/handle_test_cmd
+```
+
+`__voicecmd__ <text>` runs a full turn through the loop, `__routinetest__ <goal>` runs a
+routine end to end, and `__autoapprove__ on|off` approves confirmation cards automatically
+so a test can run through. The outcome goes to the log:
 
 ```bash
 /usr/bin/log stream --predicate 'subsystem == "com.dimarussu.Handle"' --level info --style compact
 ```
 
-`__voicecmd__ <text>` runs a full turn through the loop, `__routinetest__ <goal>` runs a
-routine end to end, and `__autoapprove__ on|off` approves confirmation cards automatically
-so a test can run through. `tools/` holds test doubles: a fake OpenAI server, a fake MCP
-server and a raw-API probe.
+`tools/` holds test doubles: a fake OpenAI server, a fake MCP server and a raw-API probe.
 
 ## Status and limits
 

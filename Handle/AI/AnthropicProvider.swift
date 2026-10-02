@@ -2,7 +2,7 @@ import Foundation
 
 /// Anthropic Messages API adapter (`POST /v1/messages`, streaming).
 /// Wire mapping only — no prompts live here. The event decoder is a pure
-/// struct so the SSE → AIStreamEvent mapping is covered by __selftest__.
+/// struct so the SSE → AIStreamEvent mapping is covered by unit tests.
 nonisolated struct AnthropicProvider: AIProvider {
     let id = "anthropic"
     let apiKey: String
