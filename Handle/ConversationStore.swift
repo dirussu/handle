@@ -124,7 +124,7 @@ actor ConversationStore {
 
     /// Case-insensitive substring search over titles AND message text —
     /// newest-first summaries. This is how anything older than the recent
-    /// list stays reachable (founder, 2026-07-10). `%`/`_` in the query are
+    /// list stays reachable (2026-07-10). `%`/`_` in the query are
     /// escaped so they match literally.
     func search(_ query: String, limit: Int = 50) -> [ConversationSummary] {
         guard open() else { return [] }

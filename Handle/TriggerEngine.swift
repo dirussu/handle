@@ -84,7 +84,7 @@ final class FolderWatcher {
     deinit { source.cancel() }
 }
 
-/// The reactive half of the automation layer (Phase 6, AGENTS.md): matches LOCAL
+/// The reactive half of the automation layer (Phase 6, AUTOMATIONS.md): matches LOCAL
 /// events to saved automations and fires them under the same standing consent as the
 /// time scheduler — approved once at save, no card at fire time, every run audited.
 /// Event-driven throughout; costs ~nothing at idle.

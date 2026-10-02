@@ -112,12 +112,12 @@ struct BorderComet<S: Shape>: View {
     var glow: Double = 0.75           // glow intensity (the tight shadow's opacity)
 
     private let segments = 72   // fine enough that per-segment width/opacity steps
-                                // vanish (52 scalloped on curves — founder; the fix
+                                // vanish (52 scalloped on curves; the fix
                                 // is mostly the BUTT caps, so 96 wasn't needed and
                                 // its draw cost competed with inference)
     /// The comet rides the shape's BORDER, so half its stroke and all of its
     /// outer glow live OUTSIDE the given bounds — and a Canvas clips to its
-    /// bounds, which swallowed the outer bloom around curves (founder
+    /// bounds, which swallowed the outer bloom around curves (seen in a
     /// screenshot, 2026-07-10: "hides behind something"). The canvas extends
     /// past the slot by this much; the path is drawn inset back to the
     /// original geometry, so the border lands exactly where it always did.
@@ -140,7 +140,7 @@ struct BorderComet<S: Shape>: View {
                                                  height: size.height - overscan * 2))
                 // Gradient tail — fine BUTT-capped ribbon segments with a small
                 // overlap. Round caps at 52-segment pitch scalloped on curves
-                // (founder screenshot): neighbouring caps splay at slightly
+                // (seen in a screenshot): neighbouring caps splay at slightly
                 // different widths. Butt caps + 96 segments + 2-step overlap
                 // tile into one continuous tapered ribbon. Fade AND width taper
                 // together — a real comet thins to nothing at the tip.
@@ -150,7 +150,7 @@ struct BorderComet<S: Shape>: View {
                     let fade = pow(Double(t), 2.6)
                     // Body brightness caps at 0.7, then a steep end-blend lifts the
                     // last ~15% to EXACTLY the head's 1.0 — the flat 0.7 ramp left a
-                    // visible brightness seam where the head stroke ended (founder
+                    // visible brightness seam where the head stroke ended (seen in a
                     // screenshot: "not smooth at the nose").
                     let alpha = min(1.0, fade * 0.7 + pow(Double(t), 10) * 0.35)
                     let width = lineWidth * (0.2 + 0.8 * t)    // hairline tip → FULL width at the head

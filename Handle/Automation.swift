@@ -2,7 +2,7 @@ import Foundation
 
 /// A saved, optionally-scheduled automation: a recipe + its filled params, approved
 /// ONCE at save time (standing consent) so a SCHEDULED run needs no confirm card
-/// (the user isn't there). Every run is still written to the audit log. See AGENTS.md.
+/// (the user isn't there). Every run is still written to the audit log. See AUTOMATIONS.md.
 ///
 /// Two payload kinds share this struct (flat, so Codable stays synthesized and old
 /// automations.json files keep decoding):
@@ -29,7 +29,7 @@ struct Automation: Codable, Identifiable {
     }
 }
 
-/// A local-EVENT trigger (Phase 6, AGENTS.md) — the reactive counterpart to
+/// A local-EVENT trigger (Phase 6, AUTOMATIONS.md) — the reactive counterpart to
 /// `AutomationSchedule`. Flat struct (not an enum) so Codable stays synthesized and
 /// old automations.json files (no `trigger` key) keep decoding. `kind` selects which
 /// fields matter: fileAppears | appLaunches | wifiConnects | windowMatches |

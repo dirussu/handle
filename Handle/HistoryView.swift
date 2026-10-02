@@ -31,7 +31,7 @@ struct HistoryBody: View {
                         }
                         ForEach(groups, id: \.label) { group in
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(group.label)   // "Yesterday" as written — no caps treatment (founder call); tracking went with it, wide-tracked lowercase reads as a mistake
+                                Text(group.label)   // "Yesterday" as written — no caps treatment (a deliberate choice); tracking went with it, wide-tracked lowercase reads as a mistake
                                     .font(.handleMicro)
                                     .foregroundStyle(.white.opacity(0.4))
                                     .padding(.horizontal, 8)
@@ -221,7 +221,7 @@ private struct HistoryRow: View {
                         .foregroundStyle(.white.opacity(0.92))
                         .lineLimit(1)
                     // Last exchange, one dim line — recognition beats recall
-                    // when scanning (founder history pass, 2026-07-10).
+                    // when scanning (history pass, 2026-07-10).
                     if !summary.preview.isEmpty {
                         Text(summary.preview)
                             .font(.handleCaption)
@@ -258,8 +258,8 @@ private struct HistoryRow: View {
         .onHover { hovering = $0 }
     }
 
-    // Just the relative time — app name and turn count were noise (founder,
-    // 2026-07-10); the preview line above carries the recognition load.
+    // Just the relative time — app name and turn count were noise
+    // (2026-07-10); the preview line above carries the recognition load.
     private var subtitle: String {
         Self.rel.localizedString(for: summary.updatedAt, relativeTo: Date())
     }

@@ -69,7 +69,7 @@ struct NotchRootView: View {
     /// pill paints NOTHING — the physical cutout is already black, so the fill
     /// added zero normally and became the visible sliding artifact during Space
     /// switches (all-Spaces windows render live in BOTH sliding space trees; no
-    /// window level opts out — tested, founder video). `cursorNearNotch` paints
+    /// window level opts out — tested, a screen recording). `cursorNearNotch` paints
     /// it back INSTANTLY as the cursor approaches (controller-fed global mouse
     /// tracking, no animation), so by the time you can hover, the pill is
     /// already solid and hover adds only the glow — pixel-identical to the old
@@ -192,7 +192,7 @@ struct NotchRootView: View {
         // animate together (Boring Notch does this — key to the smoothness).
         .compositingGroup()
         // Symmetric soft glow (no y offset) on hover or while open. Bumped from
-        // Boring Notch's radius 6 @ 0.7 on founder request — a bit stronger.
+        // Boring Notch's radius 6 @ 0.7 on request — a bit stronger.
         .shadow(
             color: (vm.phase == .open || isHovering) ? .black.opacity(0.85) : .clear,
             radius: 9
@@ -582,7 +582,7 @@ private struct NotificationCenterView: View {
 }
 
 /// The capsule that folds the notification stack. Hover = the chevron turns
-/// white, nothing else (founder, 2026-07-10: the fill/stroke lift read as
+/// white, nothing else (2026-07-10: the fill/stroke lift read as
 /// "glass" — too much). Idle sits at 0.55 so the white step is visible.
 private struct CollapseHandle: View {
     let reduce: Bool

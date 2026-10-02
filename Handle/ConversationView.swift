@@ -272,7 +272,7 @@ struct ConversationContent: View {
                 .disabled(conversation.isAwaitingResponse)
 
                 // NOT disabled while a turn runs — typing mid-turn queues the
-                // message (founder ask); Enter submits into the queue.
+                // message (by request); Enter submits into the queue.
                 TextField(conversation.visibleMessages.isEmpty ? "Ask Handle…" : "Reply…", text: $conversation.inputDraft, axis: .vertical)
                     .textFieldStyle(.plain)
                     .font(.handleBody)

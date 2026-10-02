@@ -18,7 +18,7 @@ struct HandleApp: App {
         // App's scene requirement for an accessory app. TextEditingCommands
         // puts an Edit menu in the (invisible) menu bar — without one, ⌘V/⌘C/
         // ⌘X/⌘A never reach ANY text field (SwiftUI's default accessory menu
-        // is App/View/Window/Help, no Edit; founder hit it pasting a connector).
+        // is App/View/Window/Help, no Edit; found pasting a connector).
         Settings { EmptyView() }
             .commands { TextEditingCommands() }
     }
@@ -69,7 +69,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         startScheduler()     // fire due saved automations (time triggers)
         startTriggerEngine() // fire saved automations on local events (file triggers)
         #if DEBUG
-        startTestHarness()   // file-watch trigger for the autonomous build/test loop
+        startTestHarness()   // file-watch trigger for the build/test loop
         #endif
 
         // Handle's primary surface: the notch. Install it at launch so the
@@ -110,7 +110,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         MCPService.shared.terminateAllChildren()
     }
 
-    // System (UNUserNotification) notifications REMOVED (founder call, 2026-07-07):
+    // System (UNUserNotification) notifications REMOVED (decided 2026-07-07):
     // every completion signal goes through Handle's own notification center — the
     // pill + result cards under the notch. One interface, no duplicate banners,
     // and no Notifications permission needed.
@@ -118,7 +118,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Accessory (LSUIElement) apps never show a menu bar — and SwiftUI's
     /// default main menu for one has NO Edit menu (App/View/Window/Help), so
     /// ⌘V/⌘C/⌘X/⌘A/⌘Z never reach any text field: typing works, pasting
-    /// silently doesn't (founder hit it in the connector paste box; the chat
+    /// silently doesn't (found in the connector paste box; the chat
     /// input had the same latent bug). Two fixes, belt and braces:
     /// 1. Insert an Edit menu AFTER SwiftUI installs its menu (it replaces
     ///    whatever exists at launch — verified by menu dump).
@@ -161,7 +161,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Hotkey
 
     private func setupHotkey() {
-        // ⌥ is the Handle key (founder, 2026-07-10 — "simpler than a chord"):
+        // ⌥ is the Handle key (2026-07-10 — "simpler than a chord"):
         // double-tap → full-screen capture; HOLD ⌥ alone → talk, release to run.
         let monitor = HotkeyMonitor(
             onDoubleTap: { [weak self] in self?.handleCapture() },
@@ -287,7 +287,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         handleCapture()
     }
 
-    // Region capture (drag-to-select) REMOVED (founder, 2026-07-10) — See is
+    // Region capture (drag-to-select) REMOVED (2026-07-10) — See is
     // ambient full-screen; a second capture concept wasn't earning its keep.
     private func handleCapture() {
         guard !isPresentingOverlay else { return }
@@ -620,7 +620,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self else { return }
             // Thinking starts at the TAP: the pre-work before the first token
             // (capture, AX probe, manifest, gating) took ~2s during which
-            // nothing moved (founder). Loop exits reset this via stopStreaming.
+            // nothing moved (by design). Loop exits reset this via stopStreaming.
             conversation.isAwaitingResponse = true
             let attachedPDF = conversation.pendingPDF
             conversation.clearPendingPDF()
@@ -692,7 +692,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Give the chat a model-written 2–4 word title after its first real
-    /// exchange (founder, 2026-07-10: raw first lines made the list
+    /// exchange (2026-07-10: raw first lines made the list
     /// unscannable). Once per conversation; flag set even when the model's
     /// title is unusable (no retry loops — the first-line fallback stands).
     /// Runs AFTER the loop, model idle, and re-saves the snapshot.
@@ -737,7 +737,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             conversation: conversation,
             onSubmit: { [weak self] text in
                 guard let self else { return }
-                // A turn is running → QUEUE (founder ask): the message runs when
+                // A turn is running → QUEUE (by request): the message runs when
                 // the current reply finishes, in order. Previously this path
                 // silently CANCELLED the running turn.
                 if self.isAgentRunning {
@@ -904,7 +904,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        // Personal-context injection (founder, 2026-07-10): calendar/reminder-
+        // Personal-context injection (2026-07-10): calendar/reminder-
         // shaped prompts get a FRESH digest (EventKit is milliseconds) folded
         // into the same slot — the model answers in ONE pass instead of a tool
         // round trip. Authorized sources only; a false-positive gate hit just
@@ -1679,7 +1679,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     #if DEBUG
-    // MARK: - DEBUG test harness (autonomous build/test loop)
+    // MARK: - DEBUG test harness (build/test loop)
     //
     // Lets the edit→build→test loop run WITHOUT driving the GUI. Poll a command
     // file: write a pointing query → the pipeline runs against the frontmost app
@@ -1752,7 +1752,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     // Identity block eval (EVALS.md): the questions Handle must
                     // never fumble, cold and at depth. Judged on "mentions
                     // Handle" + (privacy) a stays-local claim; full replies
-                    // logged for the founder's wording pass.
+                    // logged for a wording pass.
                     guard let self else { return }
                     let cases = ["who are you?", "who made you?",
                                  "do you send my data to the cloud?",
@@ -1851,7 +1851,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 else if cmd == "__trigbatchtest__" {
                     // v2 TRIGGERS BATCH: save one automation per new kind, then
                     // drive the REAL handlers with synthetic events (locking the
-                    // founder's screen / editing his calendar is off-limits) —
+                    // the screen or editing the calendar is off-limits) —
                     // proves match → dedupe → fire → recipe run for all three.
                     AutomationStore.shared.add(Automation(id: "trigwin", name: "window test", recipeId: "set-volume",
                         paramsJSON: "{\"level\": 31}", trigger: AutomationTrigger(kind: "windowMatches", window: "Handle Probe")))
@@ -2202,7 +2202,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         agentLog.info("planprobe PLAN for \"\(goal, privacy: .public)\":\n\(plan, privacy: .public)")
     }
 
-    // MARK: - Recipe engine (Phase 1 prototype — see AGENTS.md)
+    // MARK: - Recipe engine (Phase 1 prototype — see AUTOMATIONS.md)
 
     #endif
     /// One text-only model turn → the reply string.
@@ -2472,7 +2472,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     #endif
     /// Repeat-guard signature: tool name + NORMALIZED args. Byte-identical
-    /// comparison missed real repeats (founder repro, 2026-07-10: the 4B's
+    /// comparison missed real repeats (reproduced 2026-07-10: the 4B's
     /// first call carried "+02: soul" — corrupted text inside the timezone
     /// offset that the lenient date parser still accepted — so the clean
     /// second call didn't match and ran again → two chips). Any value that
@@ -3169,7 +3169,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         check("reg write_file=confirm", ToolRegistry.tool(named: "write_file")?.confirmation == .confirm)   // preview before mutation
         check("reg draft_email=confirm", ToolRegistry.tool(named: "draft_email_reply")?.confirmation == .confirm)
         check("reg draft_imessage=confirm", ToolRegistry.tool(named: "draft_imessage")?.confirmation == .confirm)
-        // Shortcuts tools (AGENTS.md Phase 0): trigger-by-name only, list is read-only.
+        // Shortcuts tools (AUTOMATIONS.md Phase 0): trigger-by-name only, list is read-only.
         check("reg list_shortcuts=auto", ToolRegistry.tool(named: "list_shortcuts")?.confirmation == .auto)
         check("reg run_shortcut=confirm", ToolRegistry.tool(named: "run_shortcut")?.confirmation == .confirm)
         check("shortcut decode name", (try? ShortcutsTools.shared.decodeRun(#"{"name":"Morning Routine"}"#))?.name == "Morning Routine")
@@ -3479,7 +3479,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         check("mcp crashloop 2 ok", !MCPConfig.isCrashLooping([mcpNow.addingTimeInterval(-1), mcpNow.addingTimeInterval(-2)], now: mcpNow))
         check("mcp crashloop none ok", !MCPConfig.isCrashLooping([], now: mcpNow))
         check("mcp config path", MCPConfig.url.path.hasSuffix("Handle/mcp.json"))
-        // Add-a-connector paste box (founder ask): both README shapes parse;
+        // Add-a-connector paste box (by request): both README shapes parse;
         // add/remove round-trips a THROWAWAY file, never the real config.
         check("mcp snippet full form", MCPConfig.parseSnippet(#"{"mcpServers":{"w":{"command":"npx","args":["-y","w"]}}}"#).keys.sorted() == ["w"])
         check("mcp snippet bare form", MCPConfig.parseSnippet(#"{"w":{"command":"npx"},"x":{"command":"uvx"}}"#).keys.sorted() == ["w", "x"])

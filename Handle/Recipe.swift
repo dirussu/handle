@@ -1,7 +1,7 @@
 import Foundation
 
 /// A parameterized automation recipe — the load-bearing unit of Handle's agentic
-/// layer (see AGENTS.md). The local 7B does NOT plan; it SELECTS a recipe (by index,
+/// layer (see AUTOMATIONS.md). The local 7B does NOT plan; it SELECTS a recipe (by index,
 /// the pointing trick) and FILLS its params (its proven strength). The recipe's body
 /// carries the reliability the 7B can't generate.
 ///

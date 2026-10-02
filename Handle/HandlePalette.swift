@@ -3,7 +3,7 @@ import SwiftUI
 // MARK: - Focus rings: none, app-wide
 //
 // SwiftUI's TextField bridges to NSTextField, whose macOS focus ring draws a
-// thick gray halo that reads as damage on Handle's black surface (founder
+// thick gray halo that reads as damage on Handle's black surface (seen in a
 // screenshot, 2026-07-10) — and `.focusEffectDisabled()` doesn't reach the
 // bridged AppKit ring. One override kills it everywhere; focus itself (cursor,
 // keyboard navigation) is untouched.
@@ -191,7 +191,7 @@ struct HandleSolidButtonStyle: ButtonStyle {
 //
 // Bare icon buttons (⋯, new chat, paperclip, trash, …) get ONE shared hover:
 // the glyph simply brightens to full white — no wash, no container, no scale
-// (founder call; DESIGN.md "hierarchy from opacity"). The modifier OWNS the
+// (a deliberate choice; DESIGN.md "hierarchy from opacity"). The modifier OWNS the
 // tint, so the label must not set its own foregroundStyle (it would override).
 
 private struct HandleIconHover: ViewModifier {

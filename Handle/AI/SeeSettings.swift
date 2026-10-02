@@ -50,7 +50,7 @@ nonisolated enum SeeSettings {
     static func isExcluded(_ bundleID: String?) -> Bool { isExcluded(bundleID, in: excludedBundleIDs) }
 
     /// Apps worth suggesting — credential stores. Offered only when installed,
-    /// and never added on their own (founder: unchecked, not silently on).
+    /// and never added on their own (unchecked, not silently on).
     static let suggestions: [(id: String, name: String)] = [
         ("com.1password.1password", "1Password"),
         ("com.bitwarden.desktop", "Bitwarden"),

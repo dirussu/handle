@@ -95,7 +95,7 @@ struct SettingsBody: View {
             CustomizeSection()
             ToolTrustSection()
             PowerUserSection()
-            IntegrationsSection()   // advanced territory (founder call) — lives with Power User
+            IntegrationsSection()   // advanced territory (a deliberate choice) — lives with Power User
             AboutSection()
         }
         .formStyle(.grouped)
@@ -325,7 +325,7 @@ private struct SentSection: View {
 }
 
 /// Screen consent: ask before a screenshot leaves, and the apps that are never
-/// captured. Suggestions are offered, never pre-checked (founder).
+/// captured. Suggestions are offered, never pre-checked (by design).
 private struct SeeSection: View {
     @State private var ask: Bool = SeeSettings.askBeforeSend
     @State private var excluded: [String] = SeeSettings.excludedBundleIDs
@@ -503,7 +503,7 @@ private struct AutomationsSection: View {
                 }
             }
             HStack {
-                // Creation IS a chat request (founder call) — the button just
+                // Creation IS a chat request (a deliberate choice) — the button just
                 // opens a fresh chat; the pipeline (parse → recipe/routine →
                 // consent card) takes it from there.
                 Button("New automation…") { NotchController.shared.onNewChat() }
@@ -646,7 +646,7 @@ private struct PermissionsSection: View {
         ]
         // Location exists ONLY because macOS gates Wi-Fi SSID reads behind it
         // (named-network triggers). A permanent "Location" row in a privacy-
-        // first app reads wrong (founder, 2026-07-10) — show it only once a
+        // first app reads wrong (2026-07-10) — show it only once a
         // named-Wi-Fi automation exists, or after the user already decided
         // (granted/denied must never become invisible).
         let locationStatus = PermissionsService.location()

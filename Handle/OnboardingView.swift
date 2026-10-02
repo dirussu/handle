@@ -228,7 +228,7 @@ private struct WelcomeStep: View {
     }
 }
 
-/// Pick a provider, paste a key, see it answer. Nothing is preselected (founder
+/// Pick a provider, paste a key, see it answer. Nothing is preselected (a deliberate
 /// decision: no default provider). Skipping is fine — Handle asks again in chat.
 struct ConnectStep: View {
     let onContinue: () -> Void

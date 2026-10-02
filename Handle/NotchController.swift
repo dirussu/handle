@@ -31,7 +31,7 @@ final class NotchWindow: NSPanel {
         appearance = NSAppearance(named: .darkAqua)
         // NOTE: Space transitions render all-Spaces windows LIVE in BOTH sliding
         // space trees — no window level opts out (dragging level tested, failed;
-        // founder video evidence). The fix lives in NotchRootView instead: the
+        // seen in a screen recording). The fix lives in NotchRootView instead: the
         // closed pill paints NOTHING on a hardware notch, so there is nothing to
         // slide. Level stays just above the menu bar.
         level = NSWindow.Level(rawValue: NSWindow.Level.mainMenu.rawValue + 3)
@@ -141,7 +141,7 @@ final class NotchController {
             }
         }
         // Space switch: the pill VANISHES for the slide and fades back in once
-        // the switch settles (founder call — the hardware notch stays put, so
+        // the switch settles (a deliberate choice — the hardware notch stays put, so
         // our pill blinks away rather than hovering over two sliding desktops).
         // There's no "swipe began" event; activeSpaceDidChange fires as the
         // switch kicks in, so hide instantly, then fade back after the

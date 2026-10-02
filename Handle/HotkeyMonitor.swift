@@ -3,7 +3,7 @@ import ApplicationServices
 
 /// The ⌥ key is Handle's key. This monitor detects BOTH gestures on it:
 /// - **double-tap** ⌥ (two quick presses, no other modifiers) → capture
-/// - **hold** ⌥ alone (≥ holdThreshold, founder call 2026-07-10: "simpler
+/// - **hold** ⌥ alone (≥ holdThreshold, decided 2026-07-10: "simpler
 ///   than a chord") → push-to-talk; release ends the capture.
 ///
 /// Hold safety: normal ⌥ usage is chords (⌥-arrow, ⌥-letters) and ⌥-drag —

@@ -237,12 +237,12 @@ final class Conversation {
     // and skip the macro-generated `withMutation` notification). Reading
     // `messages` and assigning the whole array back guarantees the setter
     // fires, which is what makes the live chat panel re-render mid-stream.
-    /// Messages typed WHILE a turn runs (founder, 2026-07-10): they queue here
+    /// Messages typed WHILE a turn runs (2026-07-10): they queue here
     /// and the loop's exit drains them in order — each gets a fresh capture
     /// when ITS turn starts. Stop clears the queue along with the turn.
     var queuedTexts: [String] = []
 
-    // Streaming presentation (founder, 2026-07-10: "typing isn't smooth"):
+    // Streaming presentation (2026-07-10: "typing isn't smooth"):
     // model tokens arrive in BURSTS — several words, then a pause — and every
     // burst re-parsed the markdown and re-laid-out the panel, which read as
     // stutter. Deltas now land in a buffer and DRAIN to the visible text at a
@@ -307,7 +307,7 @@ final class Conversation {
         drainTimer = nil
     }
 
-    /// Strip emoji from DISPLAYED chat text (founder call, 2026-07-10: the 4B
+    /// Strip emoji from DISPLAYED chat text (decided 2026-07-10: the 4B
     /// ignores "use emoji rarely" and half-ignores "do not use emoji" — probed
     /// live; a deterministic strip is the only reliable dial). Applies to chat
     /// bubbles only — tool payloads and file contents are never touched.
@@ -511,7 +511,7 @@ final class Conversation {
                                     messages: saved)
     }
 
-    /// A model-written 2–4 word title (founder, 2026-07-10 — raw first lines
+    /// A model-written 2–4 word title (2026-07-10 — raw first lines
     /// made the Chats list unscannable). Set once per conversation, after the
     /// first real exchange; `snapshot()` prefers it. Restored conversations
     /// carry their stored title here so a later save never regresses it.
