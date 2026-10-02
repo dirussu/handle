@@ -35,16 +35,17 @@ enum ScreenTools {
 
     static let typeTextTool = Tool(
         name: "type_text",
-        description: "Type text into whatever has keyboard focus right now (click a field first if needed). Newlines press Return. Long text is pasted, and the clipboard is restored afterwards.",
-        inputSchema: ["type": "object", "properties": ["text": ["type": "string"]], "required": ["text"]],
+        description: "Type text into the focused field of `app` (click a field first if needed). `app` is the app you mean the text for: keystrokes go to whatever is in front, so nothing is typed unless that app is in front — call focus_app first and check its result. Newlines press Return. Long text is pasted, and the clipboard is restored afterwards.",
+        inputSchema: ["type": "object", "properties": ["text": ["type": "string"], "app": ["type": "string", "description": "The app that must be in front, e.g. TextEdit"]], "required": ["text", "app"]],
         confirmation: .confirm)
 
     static let pressKeyTool = Tool(
         name: "press_key",
-        description: "Press one key, optionally with modifiers — e.g. return, tab, escape, space, delete, up/down/left/right, home/end, pageup/pagedown, f1–f12, a–z, 0–9. Modifiers: command, shift, option, control.",
+        description: "Press one key in `app`, optionally with modifiers — e.g. return, tab, escape, space, delete, up/down/left/right, home/end, pageup/pagedown, f1–f12, a–z, 0–9. Modifiers: command, shift, option, control. `app` is the app you mean the key for; nothing is pressed unless that app is in front.",
         inputSchema: ["type": "object",
-                      "properties": ["key": ["type": "string"], "modifiers": ["type": "array", "items": ["type": "string", "enum": ["command", "shift", "option", "control"]]]],
-                      "required": ["key"]],
+                      "properties": ["key": ["type": "string"], "modifiers": ["type": "array", "items": ["type": "string", "enum": ["command", "shift", "option", "control"]]],
+                                     "app": ["type": "string", "description": "The app that must be in front, e.g. Safari"]],
+                      "required": ["key", "app"]],
         confirmation: .confirm)
 
     static let scrollTool = Tool(
@@ -82,7 +83,7 @@ enum ScreenTools {
     static func focusApp(named name: String) async throws -> String {
         if let app = runningApp(named: name) {
             app.activate()
-            return "\(app.localizedName ?? name) is now in front."
+            return await frontReport(for: app, verb: "is now in front")
         }
         let trimmed = name.trimmingCharacters(in: .whitespaces)
         guard !trimmed.contains("/"), !trimmed.contains(".."), !trimmed.hasPrefix(".") else { throw ScreenToolError.appNotFound(trimmed) }
@@ -95,8 +96,40 @@ enum ScreenTools {
         }
         let config = NSWorkspace.OpenConfiguration()
         config.activates = true
-        _ = try await NSWorkspace.shared.openApplication(at: url, configuration: config)
-        return "Launched \(trimmed); it should be in front in a moment."
+        let launched = try await NSWorkspace.shared.openApplication(at: url, configuration: config)
+        return await frontReport(for: launched, verb: "was launched and is in front", wait: 30)
+    }
+
+    /// Activation is a request, not a guarantee (the user may be typing elsewhere,
+    /// macOS may decline) — say what actually happened.
+    private static func frontReport(for app: NSRunningApplication, verb: String, wait tenths: Int = 12) async -> String {
+        let name = app.localizedName ?? "The app"
+        for _ in 0..<tenths {
+            if NSWorkspace.shared.frontmostApplication?.processIdentifier == app.processIdentifier { return "\(name) \(verb)." }
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+        return "\(name) was asked to come to the front, but \(frontAppName) is still in front. Don't type or press keys for \(name) until it is — try focus_app again or tell the user."
+    }
+
+    /// The app that receives keystrokes right now.
+    static var frontAppName: String { NSWorkspace.shared.frontmostApplication?.localizedName ?? "an unknown app" }
+
+    /// Pure: does the app the caller named mean this front app? (name or bundle id, case-insensitive)
+    nonisolated static func appMatches(_ wanted: String, name: String?, bundleID: String?) -> Bool {
+        var w = wanted.trimmingCharacters(in: .whitespaces).lowercased()
+        if w.hasSuffix(".app") { w = String(w.dropLast(4)) }
+        guard !w.isEmpty else { return false }
+        return name?.lowercased() == w || bundleID?.lowercased() == w
+    }
+
+    /// Keystrokes go to whatever is in front, so the caller names the app it means and
+    /// nothing is sent when another one is there. (Seen live 2026-10-02: text meant for
+    /// TextEdit landed in a chat window the user had switched to.)
+    static func requireFront(_ app: String) throws {
+        let front = NSWorkspace.shared.frontmostApplication
+        guard appMatches(app, name: front?.localizedName, bundleID: front?.bundleIdentifier) else {
+            throw ScreenToolError.wrongFrontApp(wanted: app, front: front?.localizedName ?? "another app")
+        }
     }
 
     /// Enumerate the app's front window; returns the numbered list AND the
@@ -180,8 +213,9 @@ enum ScreenTools {
 
     /// Short text is typed as key events (no clipboard); long text is pasted via
     /// ⌘V with the clipboard restored. Newlines become Return presses.
-    static func typeText(_ text: String) async throws -> String {
+    static func typeText(_ text: String, into app: String) async throws -> String {
         guard !text.isEmpty else { return "(nothing to type)" }
+        try requireFront(app)
         if text.count > 300 {
             let prior = ClipboardScratch.setString(text)
             _ = try await pressKey("v", modifiers: ["command"])
@@ -192,6 +226,7 @@ enum ScreenTools {
         let src = CGEventSource(stateID: .hidSystemState)
         let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
         for (i, line) in lines.enumerated() {
+            if i > 0 { try requireFront(app) }   // the front app can change mid-text
             for chunk in chunks(of: String(line), size: 20) {
                 var utf16 = Array(chunk.utf16)
                 guard let down = CGEvent(keyboardEventSource: src, virtualKey: 0, keyDown: true),
@@ -203,7 +238,7 @@ enum ScreenTools {
             }
             if i < lines.count - 1 { _ = try await pressKey("return", modifiers: []); try await Task.sleep(for: .milliseconds(30)) }
         }
-        return "Typed \(text.count) characters."
+        return "Typed \(text.count) characters into \(frontAppName)."
     }
 
     static func chunks(of s: String, size: Int) -> [String] {
@@ -252,8 +287,11 @@ extension ScreenTools {
 
 enum ScreenToolError: LocalizedError {
     case appNotFound(String), unknownKey(String), badDirection(String), eventFailed
+    case wrongFrontApp(wanted: String, front: String)
     var errorDescription: String? {
         switch self {
+        case .wrongFrontApp(let wanted, let front):
+            return "Nothing was sent: \(front) is in front, not \(wanted). Call focus_app for \(wanted), check that it reports \(wanted) in front, then try again."
         case .appNotFound(let n): return "No app named \"\(n)\" is installed."
         case .unknownKey(let k): return "Unknown key \"\(k)\"."
         case .badDirection(let d): return "Unknown scroll direction \"\(d)\"."
@@ -264,6 +302,6 @@ enum ScreenToolError: LocalizedError {
 
 struct FocusAppInput: Decodable { let name: String }
 struct ReadWindowInput: Decodable { let app: String?; let limit: Int? }
-struct TypeTextInput: Decodable { let text: String }
-struct PressKeyInput: Decodable { let key: String; let modifiers: [String]? }
+struct TypeTextInput: Decodable { let text: String; let app: String }
+struct PressKeyInput: Decodable { let key: String; let modifiers: [String]?; let app: String }
 struct ScrollInput: Decodable { let direction: String; let amount: Int? }

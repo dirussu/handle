@@ -113,10 +113,11 @@ enum ToolRegistry {
                 return ToolResult(content: "click_element is executed by the agent loop.", isError: true, displaySummary: nil)
             case "type_text":
                 let input = try FileTools.shared.decode(TypeTextInput.self, from: argsJSON)
-                return ToolResult(content: try await ScreenTools.typeText(input.text), isError: false, displaySummary: "Typed \(input.text.count) chars")
+                return ToolResult(content: try await ScreenTools.typeText(input.text, into: input.app), isError: false, displaySummary: "Typed \(input.text.count) chars into \(input.app)")
             case "press_key":
                 let input = try FileTools.shared.decode(PressKeyInput.self, from: argsJSON)
-                return ToolResult(content: try await ScreenTools.pressKey(input.key, modifiers: input.modifiers ?? []), isError: false, displaySummary: "Pressed \(input.key)")
+                try ScreenTools.requireFront(input.app)
+                return ToolResult(content: try await ScreenTools.pressKey(input.key, modifiers: input.modifiers ?? []), isError: false, displaySummary: "Pressed \(input.key) in \(input.app)")
             case "scroll":
                 let input = try FileTools.shared.decode(ScrollInput.self, from: argsJSON)
                 return ToolResult(content: try ScreenTools.scroll(direction: input.direction, amount: input.amount ?? 5), isError: false, displaySummary: "Scrolled \(input.direction)")

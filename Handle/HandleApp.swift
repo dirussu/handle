@@ -1545,7 +1545,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         - save_automation / list_automations / run_automation / delete_automation — automations Handle runs on its own (schedule and/or event); run_subagent(goal) delegates a self-contained sub-task and returns its answer; run_in_background(goal) starts a longer read-only task whose result lands under the notch. Every one of these is confirmed by the user.
         - fetch_url(url) — the readable text of a web page. Connector tools named mcp__… are the user's own MCP integrations (always confirmed).\(WebSettings.searchEnabled ? " web_search — search the web when you need current facts." : "")
         - list_windows / focus_app(name) — what's open, and bring an app to the front (launches it if needed).
-        \(UserTools.tools.isEmpty ? "" : "The user's own tools (defined in Settings → Customize; use them like any other):\n" + ToolRegistry.promptSpec(for: UserTools.tools) + "\n")- read_window([app]) → numbered on-screen elements; click_element(index) presses one (the user confirms); type_text(text) types into the focused field; press_key(key, [modifiers]) e.g. return, tab, escape, command+s; scroll(direction, [amount]); read_screen_text — the visible text via OCR. Work in any app like a person would: read_window → click_element / type_text → read_window again to check.
+        \(UserTools.tools.isEmpty ? "" : "The user's own tools (defined in Settings → Customize; use them like any other):\n" + ToolRegistry.promptSpec(for: UserTools.tools) + "\n")- read_window([app]) → numbered on-screen elements; click_element(index) presses one (the user confirms); type_text(text, app) types into the focused field of that app; press_key(key, [modifiers], app) e.g. return, tab, escape, command+s — both name the app they are meant for and send NOTHING unless it is in front (focus_app first, and read its result); scroll(direction, [amount]); read_screen_text — the visible text via OCR. Work in any app like a person would: read_window → click_element / type_text → read_window again to check.
         """
     }
 
@@ -1653,11 +1653,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                       "due_iso": "Due", "priority": "Priority", "path": "File", "src": "From", "dst": "To",
                       "location": "Location", "notes": "Notes", "to": "To", "subject": "Subject",
                       "body": "Body", "message": "Message", "content": "Contents", "script": "Script",
-                      "command": "Command", "working_directory": "In folder"]
+                      "command": "Command", "working_directory": "In folder", "app": "In app", "key": "Key", "modifiers": "With", "text": "Text"]
         // Long fields (content, script) go LAST; everything else reads top-down.
         let order = ["purpose", "title", "start_iso", "end_iso", "due_iso", "priority", "to", "subject",
                      "location", "notes", "path", "src", "dst", "command", "working_directory",
-                     "message", "body", "content", "script"]
+                     "app", "key", "modifiers", "text", "message", "body", "content", "script"]
         func rank(_ k: String) -> Int { order.firstIndex(of: k) ?? order.count }
         return args
             .sorted { rank($0.key) < rank($1.key) }
@@ -3295,6 +3295,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         check("trust: disabled + don't ask round trip; alwaysAsk never trusted", { let n = "__selftest_tool__"; TrustSettings.setDisabled(n, true); let off = TrustSettings.isDisabled(n); TrustSettings.setDisabled(n, false); TrustSettings.setDontAsk(n, true); let trusted = TrustSettings.isTrusted(n); TrustSettings.setDontAsk(n, false); TrustSettings.setDontAsk("save_automation", true); let never = !TrustSettings.isTrusted("save_automation"); TrustSettings.setDontAsk("save_automation", false); return off && !TrustSettings.isDisabled(n) && trusted && !TrustSettings.isTrusted(n) && never }())
         check("instructions: block empty ↔ text; capped", UserInstructions.block(for: "  \n ").isEmpty && UserInstructions.block(for: "Call me Dee").hasSuffix("Call me Dee") && UserInstructions.block(for: String(repeating: "x", count: 9000)).count < 4300)
         check("registry: all = builtins + user tools", ToolRegistry.all.count == ToolRegistry.builtinTools.count + UserTools.tools.count && UserTools.reservedNames.contains("list_files") && UserTools.reservedNames.contains("run_subagent"))
+        check("screen: keystrokes name their app", ScreenTools.appMatches("TextEdit", name: "TextEdit", bundleID: "com.apple.TextEdit") && ScreenTools.appMatches(" textedit.app ", name: "TextEdit", bundleID: nil) && ScreenTools.appMatches("com.apple.Safari", name: "Safari", bundleID: "com.apple.Safari") && !ScreenTools.appMatches("TextEdit", name: "ChatGPT", bundleID: "com.openai.chat") && !ScreenTools.appMatches("", name: "X", bundleID: nil) && !ScreenTools.appMatches("TextEdit", name: nil, bundleID: nil))
+        check("screen: type_text + press_key require app", ((ScreenTools.typeTextTool.inputSchema["required"] as? [String]) ?? []).contains("app") && ((ScreenTools.pressKeyTool.inputSchema["required"] as? [String]) ?? []).contains("app") && (ScreenToolError.wrongFrontApp(wanted: "TextEdit", front: "ChatGPT").errorDescription ?? "").hasPrefix("Nothing was sent: ChatGPT is in front"))
         check("automation: old json decodes with no policy", { let json = #"{"id":"1","name":"n","recipeId":"r","paramsJSON":"{}","enabled":true,"lastRunKey":""}"#; let a = try? JSONDecoder().decode(Automation.self, from: Data(json.utf8)); return a?.policy == nil && a?.name == "n" }())
         check("ledger: start → finish", { let l = TaskLedger(); let id = l.start(goal: "g"); let running = l.running.count == 1; l.finish(id: id, result: "ok"); return running && l.entries.first?.status == .done && l.entries.first?.result == "ok" && id.count == 8 }())
         check("agent tools: six, consent kinds", AgentTools.tools.count == 6 && AgentTools.tools.filter { $0.confirmation == .confirm }.map(\.name).sorted() == ["delete_automation", "run_automation", "run_in_background", "run_subagent", "save_automation"])
