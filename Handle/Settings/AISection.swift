@@ -8,7 +8,7 @@ struct AISection: View {
     @State private var kind: AIProviderKind? = AIConfig.provider
     @State private var model: String = AIConfig.model ?? AIConfig.provider?.defaultModel ?? ""
     @ObservedObject private var engine = CloudEngine.shared
-    // OpenAI-compatible endpoint (phase 4)
+    // OpenAI-compatible endpoint
     @State private var baseURL: String = AIConfig.openAIBaseURLString
     @State private var serverTools: Bool = AIConfig.openAISupportsTools
     @State private var serverVision: Bool = AIConfig.openAISupportsVision

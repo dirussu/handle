@@ -5,9 +5,9 @@ import OSLog
 
 extension AppDelegate {
     /// Pull a tool-call JSON object out of the reply, however the model wrapped it
-    /// — `<tool_call>` tags, a ```json fence, or bare JSON. The local 7B is
-    /// inconsistent about the wrapper (Qwen 2.5 favors a ```json fence), so we
-    /// ignore the wrapper entirely and scan for the JSON object itself.
+    /// — `<tool_call>` tags, a ```json fence, or bare JSON. Local models are
+    /// inconsistent about the wrapper, so we ignore it entirely and scan for the
+    /// JSON object itself.
     func parseToolCall(_ text: String) -> (name: String, args: [String: Any])? {
         for json in jsonObjectCandidates(in: text) {
             guard let data = json.data(using: .utf8),
@@ -15,10 +15,10 @@ extension AppDelegate {
                   let name = obj["name"] as? String else { continue }
             return (name, (obj["arguments"] as? [String: Any]) ?? [:])
         }
-        return parseFunctionCall(text)   // the 7B sometimes emits name(k="v", …) instead of JSON
+        return parseFunctionCall(text)   // a small model sometimes emits name(k="v", …) instead of JSON
     }
 
-    /// Fallback for the Python-function-call syntax the local 7B sometimes emits
+    /// Fallback for the Python-function-call syntax a small local model sometimes emits
     /// instead of JSON — `create_reminder(title="Call mom", priority="high")`.
     /// Anchored on KNOWN tool names (earliest occurrence wins) so free prose can't
     /// false-match; the paren scan is string-aware (quoted commas/parens are safe).
@@ -106,7 +106,7 @@ extension AppDelegate {
         return results.sorted { $0.count > $1.count }
     }
 
-    /// Coerce a tool-call argument to Int. The local 7B is inconsistent about JSON
+    /// Coerce a tool-call argument to Int. Local models are inconsistent about JSON
     /// types — it sometimes emits a number as a string (`"index": "16"`), which a
     /// plain `as? NSNumber` would silently drop. Accept number, string, or a
     /// stray-whitespace string.

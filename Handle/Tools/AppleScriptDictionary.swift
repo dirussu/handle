@@ -1,7 +1,7 @@
 import Foundation
 
 /// Fetches a scriptable app's AppleScript dictionary (via the `sdef` CLI) and condenses
-/// it to the vocabulary the local 7B needs — class names with their property names+types,
+/// it to the vocabulary a small local model needs — class names with their property names+types,
 /// plus command names. Injected into the retry prompt after a `run_applescript` failure so
 /// the model repairs its script with the app's REAL vocabulary. Proven in the eval harness
 /// to fix vocabulary errors, and scalable to ANY scriptable app (no hand-written per-app
@@ -44,7 +44,7 @@ enum AppleScriptDictionary {
     }
 
     /// Reduce verbose sdef XML to `class name: prop (type), …` lines + a command list.
-    /// Capped at 6000 chars — Mail/Finder dictionaries would otherwise blow the 7B's context.
+    /// Capped at 6000 chars — Mail/Finder dictionaries would otherwise blow a small model's context.
     static func condense(_ xml: String, appName: String) -> String {
         var classes: [(name: String, properties: [String])] = []
         var commands: [String] = []

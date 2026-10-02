@@ -22,7 +22,7 @@ nonisolated enum ScreenshotStatus: Equatable, Sendable {
     }
 }
 
-/// Screen-sharing consent (PROVIDERS.md phase 3). Capture is local and free;
+/// Screen-sharing consent. Capture is local and free;
 /// these decide whether an excluded app is captured at all, and whether the
 /// user is asked before a screenshot leaves the Mac. Both default to "off":
 /// nothing is excluded silently, nothing asks until the user wants it to.

@@ -319,7 +319,7 @@ final class NotchController {
     }
 
     /// A screenshot is being sent to the provider: show the eye for a moment.
-    /// Brief and glanceable, not a modal (PROVIDERS.md phase 3).
+    /// Brief and glanceable, not a modal.
     func flashSeeing(seconds: Double = 1.8) {
         install()
         for n in notches { n.vm.isSeeing = true }

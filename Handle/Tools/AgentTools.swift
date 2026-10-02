@@ -1,6 +1,6 @@
 import Foundation
 
-/// Agents as tools (ASSISTANT.md phase 4). Definitions only — the loop executes
+/// Agents as tools. Definitions only — the loop executes
 /// them, because they need the loop itself (sub-agents), its consent path
 /// (saving/deleting automations) or the ledger (background tasks).
 @MainActor

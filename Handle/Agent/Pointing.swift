@@ -6,7 +6,7 @@ import OSLog
 extension AppDelegate {
     /// The point_at tool spec. We give the model a NUMBERED LIST of the real
     /// on-screen elements (from AX, each with an exact frame) and have it pick one
-    /// by index — the local 7B is good at naming the right element but bad at
+    /// by index — a small local model is good at naming the right element but bad at
     /// estimating its coordinates, so AX supplies the geometry. Empty list (no AX,
     /// e.g. custom-drawn apps) → no pointing instruction at all.
     func pointAtToolInstruction(elements: [AXElement], native: Bool = false) -> String {
@@ -61,8 +61,8 @@ extension AppDelegate {
             return false
         }
         // AX-select: the model picked an element index from the candidate list we
-        // gave it; highlight that element's EXACT frame. No coordinate path — the
-        // local 7B can't localize, and AX already supplies the geometry.
+        // gave it; highlight that element's EXACT frame. There is no coordinate path:
+        // models place points unreliably, and accessibility already supplies the geometry.
         guard let idx = Self.intArg(call.args["index"]) else {
             agentLog.info("runTurn: point_at without an index (args: \(call.args.keys.sorted().joined(separator: ","), privacy: .public))")
             return false

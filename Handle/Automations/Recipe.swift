@@ -1,12 +1,11 @@
 import Foundation
 
-/// A parameterized automation recipe — the load-bearing unit of Handle's agentic
-/// layer (see AUTOMATIONS.md). The local 7B does NOT plan; it SELECTS a recipe (by index,
-/// the pointing trick) and FILLS its params (its proven strength). The recipe's body
-/// carries the reliability the 7B can't generate.
+/// A parameterized automation recipe: a verified AppleScript with named parameters.
+/// The model does not write the script. It picks a recipe and fills in the parameters,
+/// and the recipe's body carries the reliability (see docs/AUTOMATIONS.md).
 ///
-/// Prototype: recipes are hardcoded in `RecipeLibrary`. Phase 2 loads `*.md` files
-/// (frontmatter + body) mined from macos-automator-mcp.
+/// A few recipes are built in (`RecipeLibrary`). The rest are `*.md` files, frontmatter
+/// plus body, loaded by `RecipeStore`.
 struct Recipe: Identifiable {
     let id: String
     let title: String
@@ -56,7 +55,7 @@ struct RecipeParam {
     /// Format a filled value for AppleScript substitution.
     func substitution(from raw: Any?) -> String {
         var raw = raw
-        // The 7B sometimes wraps a scalar in a 1-element array ([25], ["true"]) — unwrap it.
+        // A small model sometimes wraps a scalar in a 1-element array ([25], ["true"]) — unwrap it.
         if type.isScalar, let arr = raw as? [Any], arr.count == 1 { raw = arr[0] }
         switch type {
         case .stringList:
@@ -219,8 +218,8 @@ enum RecipeFile {
 
 /// The live recipe set: built-in `RecipeLibrary.all` PLUS any `*.md` files in
 /// ~/Library/Application Support/Handle/recipes/ (a file with a built-in's id overrides
-/// it). This is how the library grows — mining macos-automator-mcp writes .md files here,
-/// and Phase 3 saves user automations the same way. No recompile to add a recipe.
+/// it). This is how the library grows: adding a recipe means adding a file, with no
+/// recompile.
 @MainActor
 final class RecipeStore {
     static let shared = RecipeStore()

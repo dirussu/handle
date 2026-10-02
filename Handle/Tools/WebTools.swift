@@ -1,6 +1,6 @@
 import Foundation
 
-/// The web, inside the loop (ASSISTANT.md phase 3). `fetch_url` works with any
+/// The web, inside the loop. `fetch_url` works with any
 /// provider: a plain GET, HTML stripped to readable text, capped. Search is the
 /// provider's server-side tool (Anthropic), behind a Settings toggle — see
 /// `WebSettings` and the loop.

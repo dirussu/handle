@@ -4,14 +4,14 @@ import OSLog
 // Running saved automations: the scheduler, the trigger engine and routines.
 
 extension AppDelegate {
-    /// ROUTINE RUN — the headless agentic pass (v2 #2): gather via one matched
+    /// ROUTINE RUN — the headless agentic pass: gather via one matched
     /// MCP tool and/or a short read-only registry-tool loop, then the model
     /// synthesizes a glanceable result for the notch pill. Standing consent:
     /// NO cards fire — so only `.auto` (read-only / workspace-scoped) registry
     /// tools may run; a `.confirm` tool named by the model is refused and
     /// logged. Every step audits under "routine:<name>".
     func runRoutine(_ a: Automation, depth: Int = 0) async -> String {
-        // The real loop, headless (ASSISTANT.md phase 4): read-only unless the
+        // The real loop, headless: read-only unless the
         // automation carries standing consent; every tool audited under
         // "routine:<name> › <tool>"; tracked in the ledger so "Stop everything" reaches it.
         let goal = a.routineGoal ?? a.name

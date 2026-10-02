@@ -1,6 +1,6 @@
 import Foundation
 
-/// Where on-device models live — since phase 5 that is only the WhisperKit voice
+/// Where on-device models live — today that is only the WhisperKit voice
 /// model (`SpeechService`). Relocatable from Settings → Voice model storage.
 enum ModelStorage {
     private static let baseKey = "handle.models.base"

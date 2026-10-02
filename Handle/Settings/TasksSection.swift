@@ -1,7 +1,7 @@
 import SwiftUI
 import AppKit
 
-/// Background agent runs + the kill switch (ASSISTANT.md phase 5).
+/// Background agent runs + the kill switch.
 struct TasksSection: View {
     @ObservedObject private var ledger = TaskLedger.shared
     @State private var expanded: Set<String> = []

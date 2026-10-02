@@ -6,7 +6,7 @@ import OSLog
 extension AppDelegate {
     /// Who Handle is — sent with EVERY turn (system role on the cloud path; folded
     /// into the user prompt on the local path, where "once in history" fades for
-    /// the 4B). Provider-aware so the privacy answer is always true. ~80 tokens,
+    /// a small model). Provider-aware so the privacy answer is always true. ~80 tokens,
     /// invisible to the user. Wording: `AgentPrompting.identity`; evals in EVALS.md.
     static var handleIdentity: String {
         AgentPrompting.identity(providerName: AIConfig.providerDisplayName, localEndpoint: AIConfig.isLocalEndpoint)
@@ -30,7 +30,7 @@ extension AppDelegate {
         // provider's prompt cache hit. The loop clears the slots when it ends.
         let preamble = conversation.pendingContextPreamble
         if consumeSlots { conversation.pendingContextPreamble = "" }
-        // Memory sits CLOSEST to the user's text — last position wins the 4B's
+        // Memory sits CLOSEST to the user's text — last position wins a small model's
         // attention; before the tool spec it gets ignored (verified live).
         let memory = conversation.pendingMemory
         if consumeSlots { conversation.pendingMemory = "" }
@@ -152,7 +152,7 @@ extension AppDelegate {
     }
 
     /// The (currently minimal) action-tool spec, folded into the prompt on an
-    /// action turn. Increment 1 wires only the read-only `recapture_screen`.
+    /// action turn. It wires only the read-only `recapture_screen`.
     func actionToolInstruction(native: Bool = false) -> String {
         // Native tool use (cloud): the tools arrive as real definitions, so the
         // prose only sets the rules. Local: the JSON call format + the same list.

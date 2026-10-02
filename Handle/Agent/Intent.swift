@@ -35,7 +35,7 @@ extension AppDelegate {
 
     /// Does the prompt ask Handle to DO something (vs. explain/ask)? Gates the
     /// action loop so plain explain/ask turns keep their validated single-turn
-    /// behavior. Conservative for Increment 1 (recapture-style intent).
+    /// behavior. Deliberately conservative (recapture-style intent).
     func promptAsksToAct(_ text: String) -> Bool {
         let t = text.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
         // HIGH-RECALL gate: offer tools for almost everything and let the model decide.

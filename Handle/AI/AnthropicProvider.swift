@@ -12,7 +12,7 @@ nonisolated struct AnthropicProvider: AIProvider {
 
     static let endpoint = URL(string: "https://api.anthropic.com/v1/messages")!
     static let apiVersion = "2023-06-01"
-    /// Bundled model choices (Settings picker, phase 2). Ids are complete as-is.
+    /// Bundled model choices (Settings picker). Ids are complete as-is.
     static let knownModels = ["claude-sonnet-5", "claude-opus-5", "claude-haiku-4-5"]
 
     init(apiKey: String, defaultModel: String = "claude-sonnet-5") {

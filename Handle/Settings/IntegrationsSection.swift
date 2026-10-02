@@ -1,7 +1,7 @@
 import SwiftUI
 import AppKit
 
-/// MCP connectors (v2 #1 increment ④): the visible, controllable side of
+/// MCP connectors: the visible, controllable side of
 /// mcp.json. Rows show each configured server with live status; Check connects
 /// and lists its tools in place, Stop disconnects. Tokens store to the
 /// Keychain here (referenced from mcp.json as `keychain:NAME`). The config

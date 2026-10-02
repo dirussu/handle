@@ -2,8 +2,8 @@ import Foundation
 import Security
 
 /// Generic-password Keychain store, one service name per purpose. Provider API
-/// keys live here (never in UserDefaults, never logged). Same SecItem shape as
-/// MCPKeychain, which phase 2 folds onto this type.
+/// keys live here (never in UserDefaults, never logged). MCPKeychain uses the same
+/// store for connector secrets.
 nonisolated struct SecretStore: Sendable {
     let service: String
 

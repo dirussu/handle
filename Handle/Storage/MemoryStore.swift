@@ -14,7 +14,7 @@ struct MemoryFact: Sendable, Identifiable {
 /// deterministic in, deterministic out, and the user can read the whole store.
 /// Per turn, `relevant(to:)` keyword-scores facts against the prompt (the same
 /// prefilter idea the recipe engine uses) and the top few are folded into the
-/// prompt — the 4B's context is too small to inject everything, always.
+/// prompt — a small model's context is too small to inject everything, always.
 /// LOCAL only, like every store in Handle.
 actor MemoryStore {
     static let shared = MemoryStore()
@@ -116,7 +116,7 @@ actor MemoryStore {
     }
 
     /// Render facts as the prompt block ("" when empty). Wording is
-    /// when-X-do-Y concrete — the 4B ignores abstract "use if relevant" asks.
+    /// when-X-do-Y concrete — a small model ignores abstract "use if relevant" asks.
     nonisolated static func preamble(for facts: [MemoryFact]) -> String {
         guard !facts.isEmpty else { return "" }
         return "The user PREVIOUSLY TOLD YOU these facts:\n"

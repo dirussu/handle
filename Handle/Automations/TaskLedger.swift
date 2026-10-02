@@ -1,7 +1,7 @@
 import Foundation
 import Combine
 
-/// Background agent runs, memory only (ASSISTANT.md phase 4/5): what was asked,
+/// Background agent runs, memory only: what was asked,
 /// whether it's still running, what came back, what it cost — and the handles
 /// the kill switch cancels.
 @MainActor

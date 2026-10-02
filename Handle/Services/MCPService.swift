@@ -163,7 +163,7 @@ enum MCPConfig {
     }
 }
 
-/// Secrets for MCP servers (increment ③). mcp.json stays claude-desktop
+/// Secrets for MCP servers. mcp.json stays claude-desktop
 /// compatible, but an env VALUE of the form `keychain:NAME` is resolved from
 /// the macOS Keychain at spawn time — the token itself never sits in the
 /// plaintext config. Items are generic passwords under one service name, so
@@ -421,7 +421,7 @@ extension MCPService {
 }
 
 
-/// Configured MCP tools as loop tools (ASSISTANT.md phase 3): one native tool per
+/// Configured MCP tools as loop tools: one native tool per
 /// server tool, named `mcp__<server>__<tool>` (sanitised to the providers' name
 /// rules), every one confirmed. The map takes a sanitised name back to its info.
 @MainActor

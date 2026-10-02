@@ -1,7 +1,7 @@
 import AppKit
 import CoreGraphics
 
-/// Hands and eyes inside the loop (ASSISTANT.md phase 2): see what's on screen
+/// Hands and eyes inside the loop: see what's on screen
 /// as numbered elements, click one, type, press keys, scroll, switch apps, read
 /// the screen's text. `click_element` is executed by the loop itself (highlight →
 /// confirm card → press, the validated pointing path); the rest run here.

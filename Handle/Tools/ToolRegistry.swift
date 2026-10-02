@@ -6,7 +6,7 @@ import EventKit
 /// turn and dispatches returned calls by name through here.
 ///
 /// Deliberately EXCLUDES the visual tools `point_at` and `highlight`: those use
-/// the model's pixel-coordinate schema, which is the validated dead-end (the 7B
+/// the model's pixel-coordinate schema, which is the validated dead-end (a small model
 /// can't localize). `point_at` is dispatched separately via the index-select path
 /// (`dispatchPointAtIfPresent`) against the live AX candidate list; `highlight`
 /// must move to AX-select before it's wired. So this registry is action tools only.
@@ -38,7 +38,7 @@ enum ToolRegistry {
     static func tool(named name: String) -> Tool? { all.first { $0.name == name } }
 
     /// Compact, token-cheap prompt rendering — ONE line per tool, args derived from
-    /// the schema (not the full JSON Schema, which would bloat the 7B's context
+    /// the schema (not the full JSON Schema, which would bloat a small model's context
     /// alongside the candidate list). Required args first, optional in [brackets]:
     ///   - create_calendar_event(title, start_iso, end_iso, [location]) — add an event…
     static func promptSpec(for tools: [Tool]) -> String {
@@ -185,7 +185,7 @@ enum ToolRegistry {
             }
         } catch let e as DecodingError {
             // A DecodingError's localizedDescription is the useless "The data
-            // couldn't be read because it is missing." — the 4B can't self-correct
+            // couldn't be read because it is missing." — a small model can't self-correct
             // from that (observed live: identical broken run_applescript calls
             // repeated across days). Name the exact broken argument + the spec.
             return ToolResult(content: describeDecodingError(e, tool: name), isError: true)

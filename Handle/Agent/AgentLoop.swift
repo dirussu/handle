@@ -112,7 +112,7 @@ extension AppDelegate {
 
         // Memory injection — the top keyword-matched facts, folded RIGHT NEXT
         // to the user's text by streamOneTurn (its own slot, not the context
-        // preamble: sandwiched before the tool spec the 4B ignored it —
+        // preamble: sandwiched before the tool spec a small model ignored it —
         // verified live). Empty for prompts that touch nothing remembered.
         if !userText.isEmpty {
             let facts = await MemoryStore.shared.relevant(to: userText)
@@ -149,7 +149,7 @@ extension AppDelegate {
         // save it as a scheduled automation (approved once) instead of running now.
         if hasScheduleHint(userText), await saveScheduledAutomationIfRequested(goal: userText, in: conversation) { return }
 
-        // Recipes and MCP no longer front-run the loop (ASSISTANT.md phase 3): the
+        // Recipes and MCP no longer front-run the loop: the
         // matching recipes are listed for `run_recipe`, and the configured MCP tools
         // are native tools, so the model can plan across all of them.
 
@@ -171,7 +171,7 @@ extension AppDelegate {
     }
 
     /// Repeat-guard signature: tool name + NORMALIZED args. Byte-identical
-    /// comparison missed real repeats (the 4B's
+    /// comparison missed real repeats (a small model's
     /// first call carried "+02: soul" — corrupted text inside the timezone
     /// offset that the lenient date parser still accepted — so the clean
     /// second call didn't match and ran again → two chips). Any value that

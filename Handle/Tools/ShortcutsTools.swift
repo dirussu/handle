@@ -18,7 +18,7 @@ struct RunShortcutInput: Decodable {
     let name: String
 }
 
-/// Reach into Shortcuts.app via the documented `shortcuts` CLI (AUTOMATIONS.md Phase 0).
+/// Reach into Shortcuts.app via the documented `shortcuts` CLI.
 /// We TRIGGER shortcuts by name; we never author `.shortcut` files (undocumented
 /// format — PRODUCT.md keeps creation out of scope).
 @MainActor

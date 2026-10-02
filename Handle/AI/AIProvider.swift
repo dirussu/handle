@@ -5,7 +5,7 @@ import UniformTypeIdentifiers
 
 // Provider-neutral model layer (PROVIDERS.md §Architecture).
 //
-// Handle owns these types; each adapter (Anthropic today, OpenAI in phase 4)
+// Handle owns these types; each adapter (Anthropic, OpenAI-compatible)
 // maps them to its wire format. Nothing above this file knows which vendor
 // is on the other end.
 //

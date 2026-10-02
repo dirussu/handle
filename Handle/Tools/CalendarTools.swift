@@ -232,7 +232,7 @@ final class CalendarTools {
 
     // MARK: - Helpers
 
-    /// Lenient parse for the local model's output. The 7B is inconsistent: it emits
+    /// Lenient parse for the local model's output. A small model is inconsistent: it emits
     /// full ISO-8601 (with `Z` or an offset), OR — once told not to use `Z` — a
     /// "naked" local time with no zone and often no seconds ("2026-07-02T15:00").
     /// Strict ISO parsing rejects the naked form, which was silently failing event

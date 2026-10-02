@@ -105,7 +105,7 @@ nonisolated enum AIConfig {
         return !(SecretStore.providers.get(account) ?? "").isEmpty
     }
 
-    // OpenAI-compatible endpoint (phase 4): base URL + what the model there can do.
+    // OpenAI-compatible endpoint: base URL + what the model there can do.
     static let openAIBaseURLKey = "handle.ai.openai.baseURL"
     static let openAINoToolsKey = "handle.ai.openai.noTools"      // stored inverted: default = supports
     static let openAINoVisionKey = "handle.ai.openai.noVision"

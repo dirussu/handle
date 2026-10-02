@@ -4,7 +4,7 @@ import OSLog
 // Matching a request to a recipe, filling its parameters and running it.
 
 extension AppDelegate {
-    /// RECIPE MATCH — prefilter by keyword, then the 7B SELECTS one by index (the
+    /// RECIPE MATCH — prefilter by keyword, then a small model SELECTS one by index (the
     /// pointing trick: enumerate candidates → pick an index; -1 = none fit). No free
     /// generation, so it can't hallucinate a tool.
     func matchRecipe(goal: String) async -> Recipe? {
@@ -44,7 +44,7 @@ extension AppDelegate {
         return (idx >= 0 && idx < candidates.count) ? candidates[idx] : nil
     }
 
-    /// RECIPE FILL — the 7B emits a JSON object of parameter values from the goal
+    /// RECIPE FILL — a small model emits a JSON object of parameter values from the goal
     /// (structured output = its strength). `[:]` for a param-less recipe.
     func fillParams(recipe: Recipe, goal: String) async -> [String: Any] {
         guard !recipe.params.isEmpty else { return [:] }

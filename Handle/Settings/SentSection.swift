@@ -1,7 +1,7 @@
 import SwiftUI
 import AppKit
 
-/// Everything that left the Mac this session — memory only (PRD principle 3,
+/// Everything that left the Mac this session — memory only (
 /// "show what you sent"): what the request was for, the screenshot thumbnail if
 /// one went along, tokens and the cost estimate.
 struct SentSection: View {

@@ -2,7 +2,7 @@ import SwiftUI
 import AppKit
 
 /// First-run state. The old hardware GATE (refuse below M1/16 GB) is gone with
-/// the on-device model (PROVIDERS.md phase 2); what remains is a soft note —
+/// the on-device model; what remains is a soft note —
 /// on-device voice (WhisperKit) wants Apple Silicon. Pure logic split out so
 /// self-tests can hit it.
 enum Onboarding {

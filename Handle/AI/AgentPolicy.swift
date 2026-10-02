@@ -1,6 +1,6 @@
 import Foundation
 
-/// What one agent run may do (ASSISTANT.md phase 4). User turns are interactive
+/// What one agent run may do. User turns are interactive
 /// (confirm cards, the Settings limits); sub-agents, routines and background
 /// tasks are headless: consequential tools run only with standing consent the
 /// user granted on the automation's card, otherwise they're refused and the run

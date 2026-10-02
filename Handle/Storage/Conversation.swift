@@ -93,7 +93,7 @@ final class Conversation {
 
     /// Snapshot of interactive UI elements on screen, refreshed on every
     /// (re)capture. The model SELECTS one by index to point at — AX supplies the
-    /// exact frame, so the model never estimates coordinates (which the local 7B
+    /// exact frame, so the model never estimates coordinates (which a small local model
     /// does badly). `var` so a recapture can refresh it.
     var axElements: [AXElement]
 
@@ -119,7 +119,7 @@ final class Conversation {
     var pendingContextPreamble: String = ""
 
     /// Remembered user facts relevant to the CURRENT turn, folded into the
-    /// prompt right next to the user's text (the 4B ignores context placed
+    /// prompt right next to the user's text (a small model ignores context placed
     /// before a long tool spec). Set per-turn by the memory injection in
     /// `runToolLoop`; consumed by the first `streamOneTurn`.
     var pendingMemory: String = ""
@@ -307,7 +307,7 @@ final class Conversation {
         drainTimer = nil
     }
 
-    /// Strip emoji from DISPLAYED chat text (the 4B
+    /// Strip emoji from DISPLAYED chat text (a small model
     /// ignores "use emoji rarely" and half-ignores "do not use emoji" — probed
     /// live; a deterministic strip is the only reliable dial). Applies to chat
     /// bubbles only — tool payloads and file contents are never touched.

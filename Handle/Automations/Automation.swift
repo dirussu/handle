@@ -8,8 +8,8 @@ import Foundation
 /// automations.json files keep decoding):
 /// - RECIPE (routineGoal == nil): resolved script, runs verbatim — deterministic.
 /// - ROUTINE (routineGoal != nil): an agentic GOAL; each run gathers fresh via
-///   read-only tools + MCP connectors, the local model synthesizes, and the result
-///   lands under the notch ("every morning, summarize my calendar"). v2 #2.
+///   read-only tools and connectors, the model writes a short result, and it
+///   lands under the notch ("every morning, summarize my calendar").
 struct Automation: Codable, Identifiable {
     var id: String
     var name: String
@@ -29,7 +29,7 @@ struct Automation: Codable, Identifiable {
     }
 }
 
-/// A local-EVENT trigger (Phase 6, AUTOMATIONS.md) — the reactive counterpart to
+/// A local-EVENT trigger — the reactive counterpart to
 /// `AutomationSchedule`. Flat struct (not an enum) so Codable stays synthesized and
 /// old automations.json files (no `trigger` key) keep decoding. `kind` selects which
 /// fields matter: fileAppears | appLaunches | wifiConnects | windowMatches |

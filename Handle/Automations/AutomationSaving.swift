@@ -69,7 +69,7 @@ extension AppDelegate {
         return ["every ", "each ", "daily", "weekday", "weekly"].contains { t.contains($0) }
     }
 
-    /// Ask the 7B to split a schedule request into a time trigger + the task to do
+    /// Ask a small model to split a schedule request into a time trigger + the task to do
     /// (NL→structured, its strength). Returns nil if it's not actually a schedule.
     func parseSchedule(_ goal: String) async -> (schedule: AutomationSchedule, task: String)? {
         if AIConfig.nativeTools {
@@ -101,7 +101,7 @@ extension AppDelegate {
     func saveScheduledAutomationIfRequested(goal: String, in conversation: Conversation) async -> Bool {
         guard let (schedule, task) = await parseSchedule(goal) else { return false }
         guard let recipe = await matchRecipe(goal: task) else {
-            // No recipe → offer a ROUTINE (v2 #2): the task saves as an agentic
+            // No recipe → offer a ROUTINE: the task saves as an agentic
             // goal that runs fresh at each fire — gather (read-only tools + MCP)
             // → synthesize → notch pill. One card = standing consent, audited.
             return await saveRoutine(task: task, schedule: schedule, in: conversation)

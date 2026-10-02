@@ -461,7 +461,7 @@ extension AppDelegate {
         agentLog.info("test harness: watching \(Self.testCmdPath, privacy: .public)")
     }
 
-    /// PLANNING PROBE (`__plan__ <goal>`): can the local 7B decompose a multi-step
+    /// PLANNING PROBE (`__plan__ <goal>`): can a small local model decompose a multi-step
     /// automation into a sane ordered plan of tool calls? Text-only, NO execution —
     /// just logs the plan for eyeballing. Decides freeform-plan vs recipe-first.
     func runPlanProbe(goal: String) async {
@@ -641,8 +641,7 @@ extension AppDelegate {
 
     /// DEBUG: drive the "working" comet for 8s WITHOUT a model turn, so its
     /// main-thread cost can be sampled in isolation — validates the Canvas rewrite
-    /// of BorderComet (the fix for the inference-starving hang) without needing the
-    /// 7B. Fire `__comet__`, then `sample $(pgrep -x Handle) 3` during the window.
+    /// of BorderComet without a model in the picture. Fire `__comet__`, then `sample $(pgrep -x Handle) 3` during the window.
     func runCometProbe() async {
         agentLog.info("comet probe: ON for 8s (no model) — sample the process now")
         NotchController.shared.setWorking(true)

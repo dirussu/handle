@@ -29,7 +29,7 @@ struct CreateReminderInput: Decodable {
         title = try c.decode(String.self, forKey: .title)
         due_iso = try c.decodeIfPresent(String.self, forKey: .due_iso)
         notes = try c.decodeIfPresent(String.self, forKey: .notes)
-        // Lenient: the 7B may send an int, a numeric string, or a word (high/medium/low).
+        // Lenient: a small model may send an int, a numeric string, or a word (high/medium/low).
         if let i = try? c.decode(Int.self, forKey: .priority) {
             priority = i
         } else if let s = try? c.decode(String.self, forKey: .priority) {
@@ -223,7 +223,7 @@ final class ReminderTools {
     // MARK: - Helpers
 
     private static func parseDate(_ s: String) -> Date? {
-        CalendarTools.parseDate(s)   // reuse the lenient shared parser (accepts the 7B's zone-less local times)
+        CalendarTools.parseDate(s)   // reuse the lenient shared parser (accepts a small model's zone-less local times)
     }
 
     static func format(_ date: Date) -> String {

@@ -38,7 +38,7 @@ struct AgentRun {
     var cancelled: Bool = false
 }
 
-/// Provider-neutral prompt pieces for the agent loop (PROVIDERS.md phase 1):
+/// Provider-neutral prompt pieces for the agent loop:
 /// the identity block, registry tools as native specs, and the conversation →
 /// provider-message projection. Main-actor because `Tool` and `Message` are.
 @MainActor
