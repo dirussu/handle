@@ -14,10 +14,5 @@ build/
 .build/
 .swiftpm/
 
-# LocalAITest build artifacts (Xcode build dir + mlx-swift compiled objects — 2.8 GB)
-xcbuild/
-LocalAITest/.build/
-LocalAITest/xcbuild/
-
 # Misc
 *.log

@@ -12,8 +12,6 @@ private let agentLog = Logger(subsystem: "com.dimarussu.Handle", category: "Agen
 struct HandleApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
-    init() { LegacyMigration.runIfNeeded() }   // before anything reads settings or opens a store
-
     var body: some Scene {
         // Handle has no conventional windows — its whole UI lives in the notch
         // (Settings and About are pages there). This empty scene only satisfies
