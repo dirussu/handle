@@ -6,6 +6,7 @@
 - Source reorganised by area. The app delegate and the Settings view are split into focused files.
 - Unit tests moved out of the app into their own test target, and run on every push.
 - Removed an unused connector-routing path and its evaluation data.
+- The agent loop is a small class with one method per kind of tool, where it used to be a single 400-line function.
 
 ## 1.0.1 (2 October 2026)
 
