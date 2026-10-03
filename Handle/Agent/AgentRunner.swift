@@ -220,7 +220,7 @@ final class AgentRunner {
     /// The same step twice in a row earns a hint, three times ends the run. A real re-check
     /// after something changed has different arguments, so it is not a repeat.
     private func checkForRepeat(_ calls: [AgentToolCall]) -> RepeatVerdict {
-        let signature = calls.map { AppDelegate.callSignature(name: $0.name, args: $0.args) }.joined(separator: " | ")
+        let signature = calls.map { RepeatGuard.signature(name: $0.name, args: $0.args) }.joined(separator: " | ")
         let seen = repeatGuard.observe(signature)
         if seen >= 3 {
             agentLog.info("agent: same step three times — asking for the final answer")
@@ -357,7 +357,7 @@ final class AgentRunner {
 
     /// Clicks an element by its index from `read_window`: highlight, card, press.
     private func clickElement(_ call: AgentToolCall) async -> Outcome {
-        guard let index = AppDelegate.intArg(call.args["index"]) else {
+        guard let index = ToolCallParser.intArg(call.args["index"]) else {
             return .done(failure(call, "click_element needs an integer index from read_window."))
         }
         if readOnly { return .done(success(call, AppDelegate.refusedNote)) }
@@ -471,7 +471,7 @@ final class AgentRunner {
         guard !goal.isEmpty else { return .done(failure(call, "run_subagent needs a goal.")) }
         guard policy.depth < 2 else { return .done(failure(call, "Sub-agents can't start sub-agents this deep — do the task yourself.")) }
         let allowedTools = call.args["tools"] as? [String]
-        let steps = AppDelegate.intArg(call.args["max_steps"]) ?? 10
+        let steps = ToolCallParser.intArg(call.args["max_steps"]) ?? 10
         let approval = await approve(title: "Start a sub-agent?",
                                      rows: [("Goal", goal), ("Tools", allowedTools?.joined(separator: ", ") ?? "read-only tools"), ("Steps", "up to \(min(steps, 15))")],
                                      label: "run_subagent")
@@ -546,8 +546,8 @@ final class AgentRunner {
     private func callConnector(_ call: AgentToolCall, _ connector: MCPToolInfo) async -> Outcome {
         let label = "mcp:\(connector.server).\(connector.name)"
         let argsJSON = call.argsJSON
-        let approval = await approve(title: app.confirmTitle(connector.name),
-                                     rows: [("Connector", connector.server), ("Tool", connector.name)] + app.confirmRows(args: call.args),
+        let approval = await approve(title: ConfirmationText.title(connector.name),
+                                     rows: [("Connector", connector.server), ("Tool", connector.name)] + ConfirmationText.rows(args: call.args),
                                      label: label)
         if Task.isCancelled { return .cancelled }
         if approval == .refused { return .done(success(call, AppDelegate.refusedNote)) }
@@ -577,7 +577,7 @@ final class AgentRunner {
         let argsJSON = call.argsJSON
         var approval = Approval.approved
         if tool.confirmation == .confirm {
-            approval = await approve(title: app.confirmTitle(call.name), rows: app.confirmRows(args: call.args), label: call.name,
+            approval = await approve(title: ConfirmationText.title(call.name), rows: ConfirmationText.rows(args: call.args), label: call.name,
                                      destructive: ["delete_file", "move_file", "run_shell"].contains(call.name))
             if Task.isCancelled { return .cancelled }
         }

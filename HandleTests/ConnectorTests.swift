@@ -2,26 +2,28 @@ import XCTest
 import AppKit
 @testable import Handle
 
-final class ConnectorTests: AppTestCase {
+@MainActor
+final class ConnectorTests: XCTestCase {
     func testAddAConnectorPasteBox() {
-        check("mcp snippet full form", MCPConfig.parseSnippet(#"{"mcpServers":{"w":{"command":"npx","args":["-y","w"]}}}"#).keys.sorted() == ["w"])
-        check("mcp snippet bare form", MCPConfig.parseSnippet(#"{"w":{"command":"npx"},"x":{"command":"uvx"}}"#).keys.sorted() == ["w", "x"])
-        check("mcp snippet junk → empty", MCPConfig.parseSnippet("paste your json here").isEmpty)
-        check("mcp snippet no-command → empty", MCPConfig.parseSnippet(#"{"w":{"args":["-y"]}}"#).isEmpty)
+        XCTAssertEqual(MCPConfig.parseSnippet(#"{"mcpServers":{"w":{"command":"npx","args":["-y","w"]}}}"#).keys.sorted(), ["w"], "mcp snippet full form")
+        XCTAssertEqual(MCPConfig.parseSnippet(#"{"w":{"command":"npx"},"x":{"command":"uvx"}}"#).keys.sorted(), ["w", "x"], "mcp snippet bare form")
+        XCTAssertTrue(MCPConfig.parseSnippet("paste your json here").isEmpty, "mcp snippet junk → empty")
+        XCTAssertTrue(MCPConfig.parseSnippet(#"{"w":{"args":["-y"]}}"#).isEmpty, "mcp snippet no-command → empty")
         let mcpTmp = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("mcp_selftest.json")
         try? FileManager.default.removeItem(at: mcpTmp)
-        check("mcp add creates file", MCPConfig.addServers(fromSnippet: #"{"a":{"command":"npx","env":{"K":"v"}}}"#, to: mcpTmp) == ["a"])
-        check("mcp add merges", MCPConfig.addServers(fromSnippet: #"{"mcpServers":{"b":{"command":"uvx"}}}"#, to: mcpTmp) == ["b"])
+        XCTAssertEqual(MCPConfig.addServers(fromSnippet: #"{"a":{"command":"npx","env":{"K":"v"}}}"#, to: mcpTmp), ["a"], "mcp add creates file")
+        XCTAssertEqual(MCPConfig.addServers(fromSnippet: #"{"mcpServers":{"b":{"command":"uvx"}}}"#, to: mcpTmp), ["b"], "mcp add merges")
         let mcpRead = (try? Data(contentsOf: mcpTmp)).map(MCPConfig.parse) ?? []
-        check("mcp add round-trip", mcpRead.map(\.name) == ["a", "b"] && mcpRead.first?.env == ["K": "v"])
+        XCTAssertEqual(mcpRead.map(\.name), ["a", "b"], "mcp add round-trip")
+        XCTAssertEqual(mcpRead.first?.env, ["K": "v"], "mcp add round-trip")
         MCPConfig.removeServer(named: "a", from: mcpTmp)
-        check("mcp remove", ((try? Data(contentsOf: mcpTmp)).map(MCPConfig.parse) ?? []).map(\.name) == ["b"])
+        XCTAssertEqual(((try? Data(contentsOf: mcpTmp)).map(MCPConfig.parse) ?? []).map(\.name), ["b"], "mcp remove")
         try? FileManager.default.removeItem(at: mcpTmp)
     }
 
     func testTypewriterDrain() {
-        check("drain amount floor", Conversation.drainAmount(backlog: 10) == 2)
-        check("drain amount scales", Conversation.drainAmount(backlog: 300) == 20)
+        XCTAssertEqual(Conversation.drainAmount(backlog: 10), 2, "drain amount floor")
+        XCTAssertEqual(Conversation.drainAmount(backlog: 300), 20, "drain amount scales")
         let typeConvo = Conversation(chatWithApp: "")
         typeConvo.addUserMessage("q")
         let streamIdx = typeConvo.startAssistantStream()
@@ -29,31 +31,33 @@ final class ConnectorTests: AppTestCase {
         typeConvo.appendChunk(at: streamIdx, "world! 🌍 Done.")
         typeConvo.finishAssistantStream(at: streamIdx)
         for _ in 0..<40 { typeConvo.drainOnce() }
-        check("drain full text lands", typeConvo.messages[streamIdx].text == "Hello, world! Done.")   // emoji stripped, nothing lost
-        check("drain finalizes stream", typeConvo.messages[streamIdx].isStreaming == false && typeConvo.isAwaitingResponse == false)
+        // emoji stripped, nothing lost
+        XCTAssertEqual(typeConvo.messages[streamIdx].text, "Hello, world! Done.", "drain full text lands")
+        XCTAssertFalse(typeConvo.messages[streamIdx].isStreaming, "drain finalizes stream")
+        XCTAssertFalse(typeConvo.isAwaitingResponse, "drain finalizes stream")
         let stopConvo = Conversation(chatWithApp: "")
         stopConvo.addUserMessage("q")
         let stopIdx = stopConvo.startAssistantStream()
         stopConvo.appendChunk(at: stopIdx, "partial answer that was still buffering")
         stopConvo.stopStreaming()
-        check("stop flushes buffer", stopConvo.messages[stopIdx].text == "partial answer that was still buffering")
+        XCTAssertEqual(stopConvo.messages[stopIdx].text, "partial answer that was still buffering", "stop flushes buffer")
     }
 
     func testMCPKeychainRefs() {
-        check("keychain ref parse", MCPKeychain.reference(in: "keychain:API_KEY") == "API_KEY")
-        check("keychain ref trims", MCPKeychain.reference(in: "keychain: MY_TOKEN ") == "MY_TOKEN")
-        check("keychain ref plain → nil", MCPKeychain.reference(in: "sk-abc123") == nil)
-        check("keychain ref empty name → nil", MCPKeychain.reference(in: "keychain:") == nil)
-        check("keychain ref mid-string → nil", MCPKeychain.reference(in: "x keychain:Y") == nil)
+        XCTAssertEqual(MCPKeychain.reference(in: "keychain:API_KEY"), "API_KEY", "keychain ref parse")
+        XCTAssertEqual(MCPKeychain.reference(in: "keychain: MY_TOKEN "), "MY_TOKEN", "keychain ref trims")
+        XCTAssertNil(MCPKeychain.reference(in: "sk-abc123"), "keychain ref plain → nil")
+        XCTAssertNil(MCPKeychain.reference(in: "keychain:"), "keychain ref empty name → nil")
+        XCTAssertNil(MCPKeychain.reference(in: "x keychain:Y"), "keychain ref mid-string → nil")
     }
 
     func testGUIAppPATHAugmentation() {
-        check("path augment appends", MCPConfig.augmentedPATH(base: "/usr/bin:/bin", extras: ["/opt/homebrew/bin"]) == "/usr/bin:/bin:/opt/homebrew/bin")
-        check("path augment dedups", MCPConfig.augmentedPATH(base: "/usr/bin:/opt/homebrew/bin", extras: ["/opt/homebrew/bin", "/x"]) == "/usr/bin:/opt/homebrew/bin:/x")
-        check("path extras have homebrew", MCPConfig.standardExtraDirs().contains("/opt/homebrew/bin"))
+        XCTAssertEqual(MCPConfig.augmentedPATH(base: "/usr/bin:/bin", extras: ["/opt/homebrew/bin"]), "/usr/bin:/bin:/opt/homebrew/bin", "path augment appends")
+        XCTAssertEqual(MCPConfig.augmentedPATH(base: "/usr/bin:/opt/homebrew/bin", extras: ["/opt/homebrew/bin", "/x"]), "/usr/bin:/opt/homebrew/bin:/x", "path augment dedups")
+        XCTAssertTrue(MCPConfig.standardExtraDirs().contains("/opt/homebrew/bin"), "path extras have homebrew")
         // Only meaningful on a Mac that has Node installed through nvm.
         if FileManager.default.fileExists(atPath: NSHomeDirectory() + "/.nvm/versions/node") {
-            check("path extras find nvm node", MCPConfig.standardExtraDirs().contains { $0.contains("/.nvm/versions/node/") && $0.hasSuffix("/bin") })
+            XCTAssertTrue(MCPConfig.standardExtraDirs().contains { $0.contains("/.nvm/versions/node/") && $0.hasSuffix("/bin") }, "path extras find nvm node")
         }
     }
 }

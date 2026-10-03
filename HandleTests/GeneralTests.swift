@@ -2,16 +2,17 @@ import XCTest
 import AppKit
 @testable import Handle
 
-final class GeneralTests: AppTestCase {
+@MainActor
+final class GeneralTests: XCTestCase {
     func testEditMenu() {
         agentLog.info("selftest menu dump: \(NSApp.mainMenu?.items.map { "\($0.title)/\($0.submenu?.title ?? "-")" }.joined(separator: ", ") ?? "NO MAIN MENU", privacy: .public)")
         let editMenu = NSApp.mainMenu?.items.compactMap(\.submenu).first { $0.title == "Edit" }
-        check("edit menu installed", editMenu != nil)
-        check("edit menu paste wired", editMenu?.items.contains { $0.action == #selector(NSText.paste(_:)) } == true)
-        check("edit menu selectall wired", editMenu?.items.contains { $0.action == #selector(NSText.selectAll(_:)) } == true)
+        XCTAssertNotNil(editMenu, "edit menu installed")
+        XCTAssertTrue(editMenu?.items.contains { $0.action == #selector(NSText.paste(_:)) } == true, "edit menu paste wired")
+        XCTAssertTrue(editMenu?.items.contains { $0.action == #selector(NSText.selectAll(_:)) } == true, "edit menu selectall wired")
     }
 
     func testTheBCorruptedTheOffset() {
-        check("sig corrupt offset matches clean", AppDelegate.callSignature(name: "t", args: ["s": "2026-07-15T00:00:00+02: soul"]) == AppDelegate.callSignature(name: "t", args: ["s": "2026-07-15T00:00:00+02:00"]))
+        XCTAssertEqual(RepeatGuard.signature(name: "t", args: ["s": "2026-07-15T00:00:00+02: soul"]), RepeatGuard.signature(name: "t", args: ["s": "2026-07-15T00:00:00+02:00"]), "sig corrupt offset matches clean")
     }
 }

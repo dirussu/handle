@@ -63,7 +63,7 @@ extension AppDelegate {
         // 0. CLICK turn — the same select-by-index as pointing, but ACTED on:
         // highlight → confirm card → AXPress → audit. Checked before pointing so
         // "click the send button" presses rather than just highlights.
-        if image != nil, !isInitial, promptAsksToClick(userText) {
+        if image != nil, !isInitial, Intent.asksToClick(userText) {
             let out = await streamTurn(in: conversation, instr: pointAtToolInstruction(elements: conversation.axElements, native: AIConfig.nativeTools),
                                        display: false, extraSpecs: [AgentPrompting.pointAtSpec])
             if !(await dispatchClick(out.call, conversation: conversation)) {
@@ -75,7 +75,7 @@ extension AppDelegate {
         // 1. Pointing turn — single step, validated index-select path. Buffered
         // (display:false) so the raw point_at JSON never shows; the highlight IS the
         // answer, so we add a message only when nothing was highlighted.
-        if image != nil, !isInitial, promptAsksToPoint(userText) {
+        if image != nil, !isInitial, Intent.asksToPoint(userText) {
             let out = await streamTurn(in: conversation, instr: pointAtToolInstruction(elements: conversation.axElements, native: AIConfig.nativeTools),
                                        display: false, extraSpecs: [AgentPrompting.pointAtSpec])
             if !dispatchPointAt(out.call, conversation: conversation) {
@@ -88,14 +88,14 @@ extension AppDelegate {
         // deterministic code, never a model turn (facts enter memory only
         // explicitly — PRODUCT.md memory layer; the user can read the whole store
         // in Settings → Memory).
-        if !isInitial, let fact = parseRememberCommand(userText) {
+        if !isInitial, let fact = Intent.rememberCommand(userText) {
             let stored = await MemoryStore.shared.remember(fact)
             let reply = stored != nil ? "Remembered: \(fact)" : "I couldn't save that."
             conversation.commitAssistantMessage(reply)
             Task { await AuditLog.shared.record(tool: "remember", argsJSON: "{}", outcome: stored != nil ? "ok" : "error", summary: String(fact.prefix(80)), confirmed: false) }
             return
         }
-        if !isInitial, let phrase = parseForgetCommand(userText) {
+        if !isInitial, let phrase = Intent.forgetCommand(userText) {
             let matches = await MemoryStore.shared.matching(phrase)
             switch matches.count {
             case 0:
@@ -136,7 +136,7 @@ extension AppDelegate {
         }
 
         // 3. Plain explain/ask — no tools, identical to the old single-turn path.
-        guard !isInitial, promptAsksToAct(userText) else {
+        guard !isInitial, Intent.asksToAct(userText) else {
             _ = await streamOneTurn(in: conversation, instr: "")
             return
         }
@@ -168,24 +168,5 @@ extension AppDelegate {
     @discardableResult
     func runAgentLoop(in conversation: Conversation, goal: String, policy: AgentPolicy, headless: Bool) async -> AgentRun {
         await AgentRunner(app: self, conversation: conversation, goal: goal, policy: policy, headless: headless).run()
-    }
-
-    /// Repeat-guard signature: tool name + NORMALIZED args. Byte-identical
-    /// comparison missed real repeats (a small model's
-    /// first call carried "+02: soul" — corrupted text inside the timezone
-    /// offset that the lenient date parser still accepted — so the clean
-    /// second call didn't match and ran again → two chips). Any value that
-    /// parses as a date collapses to its wall-clock MINUTE; everything else
-    /// lowercases and trims, so same-intent re-calls match regardless of the
-    /// model's textual jitter.
-    static func callSignature(name: String, args: [String: Any]) -> String {
-        let parts = args.keys.sorted().map { key -> String in
-            let raw = String(describing: args[key] ?? "")
-            if let date = CalendarTools.parseDate(raw) {
-                return "\(key)=@\(Int(date.timeIntervalSince1970 / 60))"
-            }
-            return "\(key)=\(raw.lowercased().trimmingCharacters(in: .whitespacesAndNewlines))"
-        }
-        return name + "|" + parts.joined(separator: "&")
     }
 }

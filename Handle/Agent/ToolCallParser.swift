@@ -1,15 +1,14 @@
 import AppKit
 import OSLog
 
-// Reading a tool call out of plain text, for model servers that cannot return one natively.
-
-extension AppDelegate {
+/// Reads a tool call out of plain text, for model servers that cannot return one natively.
+enum ToolCallParser {
     /// Pull a tool-call JSON object out of the reply, however the model wrapped it
     /// — `<tool_call>` tags, a ```json fence, or bare JSON. Local models are
     /// inconsistent about the wrapper, so we ignore it entirely and scan for the
     /// JSON object itself.
-    func parseToolCall(_ text: String) -> (name: String, args: [String: Any])? {
-        for json in jsonObjectCandidates(in: text) {
+    static func parse(_ text: String) -> (name: String, args: [String: Any])? {
+        for json in ToolCallParser.jsonObjectCandidates(in: text) {
             guard let data = json.data(using: .utf8),
                   let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let name = obj["name"] as? String else { continue }
@@ -22,7 +21,7 @@ extension AppDelegate {
     /// instead of JSON — `create_reminder(title="Call mom", priority="high")`.
     /// Anchored on KNOWN tool names (earliest occurrence wins) so free prose can't
     /// false-match; the paren scan is string-aware (quoted commas/parens are safe).
-    private func parseFunctionCall(_ text: String) -> (name: String, args: [String: Any])? {
+    private static func parseFunctionCall(_ text: String) -> (name: String, args: [String: Any])? {
         // Require the response to BE the call (start with a known name( after any
         // opening code fence) — so prose that merely mentions "open_url(...)" can't misfire.
         var t = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -50,7 +49,7 @@ extension AppDelegate {
 
     /// `key="value", key2=123, key3=true` → dict, respecting quoted commas and
     /// coercing bare numbers/bools. Quoted values stay strings (unescaped).
-    private func parseKeyValueArgs(_ s: String) -> [String: Any] {
+    private static func parseKeyValueArgs(_ s: String) -> [String: Any] {
         var parts: [String] = [], cur = ""
         var inString = false, escaped = false, quote: Character = "\""
         for c in s {
@@ -84,7 +83,7 @@ extension AppDelegate {
     /// Every balanced `{…}` substring, longest first — so the outermost object
     /// (the one carrying name+arguments) is tried before any nested object. Good
     /// enough for tool calls; doesn't special-case braces inside string values.
-    func jsonObjectCandidates(in text: String) -> [String] {
+    static func jsonObjectCandidates(in text: String) -> [String] {
         let chars = Array(text)
         var results: [String] = []
         var stack: [Int] = []

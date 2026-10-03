@@ -39,9 +39,12 @@ extension AppDelegate {
             )
         }
     }
+}
 
+/// The words on a confirmation card: its title and one row per argument.
+enum ConfirmationText {
     /// Friendly card title from a tool name: "create_calendar_event" → "Create calendar event?".
-    func confirmTitle(_ toolName: String) -> String {
+    static func title(_ toolName: String) -> String {
         let phrase = toolName.split(separator: "_").joined(separator: " ")
         return phrase.isEmpty ? "Run this action?" : "\(phrase.prefix(1).uppercased())\(phrase.dropFirst())?"
     }
@@ -49,7 +52,7 @@ extension AppDelegate {
     /// One card row per NON-EMPTY argument, in a sensible order with friendly labels
     /// and (for ISO dates) human-readable local times — so the user can verify the
     /// action at a glance before approving.
-    func confirmRows(args: [String: Any]) -> [(label: String, value: String)] {
+    static func rows(args: [String: Any]) -> [(label: String, value: String)] {
         let pretty = ["purpose": "What it does", "title": "Title", "start_iso": "Starts", "end_iso": "Ends",
                       "due_iso": "Due", "priority": "Priority", "path": "File", "src": "From", "dst": "To",
                       "location": "Location", "notes": "Notes", "to": "To", "subject": "Subject",
@@ -63,7 +66,7 @@ extension AppDelegate {
         return args
             .sorted { rank($0.key) < rank($1.key) }
             .compactMap { (k, v) -> (label: String, value: String)? in
-                var val = friendlyValue(key: k, raw: String(describing: v))
+                var val = ConfirmationText.friendlyValue(key: k, raw: String(describing: v))
                 guard !val.isEmpty else { return nil }
                 if val.count > 1000 { val = String(val.prefix(1000)) + "\n… (+\(val.count - 1000) more characters)" }
                 return (label: pretty[k] ?? k, value: val)
@@ -72,7 +75,7 @@ extension AppDelegate {
 
     /// Render an argument value for display: ISO datetimes become a local
     /// "Jul 1, 2026 at 3:00 PM"; everything else is passed through (trimmed).
-    func friendlyValue(key: String, raw: String) -> String {
+    static func friendlyValue(key: String, raw: String) -> String {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         if key.hasSuffix("_iso"), !trimmed.isEmpty, let d = CalendarTools.parseDate(trimmed) {
             let out = DateFormatter(); out.dateStyle = .medium; out.timeStyle = .short

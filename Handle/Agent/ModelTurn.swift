@@ -123,7 +123,7 @@ extension AppDelegate {
             }
             // No native tools (a compatible server without them): the call, if any,
             // is JSON in the reply text.
-            if calls.isEmpty, toolTurn, !AIConfig.nativeTools, let scraped = parseToolCall(buf) {
+            if calls.isEmpty, toolTurn, !AIConfig.nativeTools, let scraped = ToolCallParser.parse(buf) {
                 calls = [AgentToolCall(id: "local", name: scraped.name, args: scraped.args)]
             }
             agentLog.info("streamTurn: finished — \(deltaCount) deltas, \(buf.count) chars, calls=\(calls.map(\.name).joined(separator: ","), privacy: .public), \(String(format: "%.1f", Date().timeIntervalSince(streamStart)))s")

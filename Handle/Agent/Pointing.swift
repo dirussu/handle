@@ -44,7 +44,7 @@ extension AppDelegate {
     /// message when this is false (no call / bad index / model declined).
     @discardableResult
     func dispatchPointAtIfPresent(_ text: String, conversation: Conversation) -> Bool {
-        guard let scraped = parseToolCall(text) else {
+        guard let scraped = ToolCallParser.parse(text) else {
             // Diagnostics: show the reply tail so we can tell whether the model
             // skipped the call, malformed it, or pointed in prose instead.
             agentLog.info("runTurn: no point_at parsed. reply tail=\"\(String(text.suffix(200)), privacy: .public)\"")
@@ -63,7 +63,7 @@ extension AppDelegate {
         // AX-select: the model picked an element index from the candidate list we
         // gave it; highlight that element's EXACT frame. There is no coordinate path:
         // models place points unreliably, and accessibility already supplies the geometry.
-        guard let idx = Self.intArg(call.args["index"]) else {
+        guard let idx = ToolCallParser.intArg(call.args["index"]) else {
             agentLog.info("runTurn: point_at without an index (args: \(call.args.keys.sorted().joined(separator: ","), privacy: .public))")
             return false
         }
@@ -90,7 +90,7 @@ extension AppDelegate {
     /// user declined). False = nothing selected; the caller shows "I don't see that."
     @discardableResult
     func dispatchClickIfPresent(_ text: String, conversation: Conversation, autoApprove: Bool = false) async -> Bool {
-        guard let scraped = parseToolCall(text) else {
+        guard let scraped = ToolCallParser.parse(text) else {
             agentLog.info("click: no selection parsed. reply tail=\"\(String(text.suffix(200)), privacy: .public)\"")
             return false
         }
@@ -100,7 +100,7 @@ extension AppDelegate {
     /// Engine-neutral core: a parsed `point_at` selection → highlight → confirm → press.
     @discardableResult
     func dispatchClick(_ call: AgentToolCall?, conversation: Conversation, autoApprove: Bool = false) async -> Bool {
-        guard let call, call.name == "point_at", let idx = Self.intArg(call.args["index"]) else {
+        guard let call, call.name == "point_at", let idx = ToolCallParser.intArg(call.args["index"]) else {
             agentLog.info("click: no selection (got \(call?.name ?? "nothing", privacy: .public))")
             return false
         }

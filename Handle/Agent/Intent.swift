@@ -1,13 +1,12 @@
 import AppKit
 import OSLog
 
-// Cheap checks on the user's wording that decide which path a message takes.
-
-extension AppDelegate {
+/// Cheap checks on the user's wording that decide which path a message takes.
+enum Intent {
     /// "remember that X" / "remember my X" / "remember I X" → the fact to store.
     /// "remember to X" is deliberately NOT memory — that's a reminder request and
     /// falls through to the normal loop (create_reminder).
-    func parseRememberCommand(_ text: String) -> String? {
+    static func rememberCommand(_ text: String) -> String? {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let lower = t.lowercased()
         guard lower.hasPrefix("remember ") else { return nil }
@@ -20,7 +19,7 @@ extension AppDelegate {
 
     /// "forget (that|about|my) X" → the phrase to match against stored facts.
     /// Bare "forget it" is colloquial, not a deletion.
-    func parseForgetCommand(_ text: String) -> String? {
+    static func forgetCommand(_ text: String) -> String? {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let lower = t.lowercased()
         guard lower.hasPrefix("forget ") else { return nil }
@@ -36,7 +35,7 @@ extension AppDelegate {
     /// Does the prompt ask Handle to DO something (vs. explain/ask)? Gates the
     /// action loop so plain explain/ask turns keep their validated single-turn
     /// behavior. Deliberately conservative (recapture-style intent).
-    func promptAsksToAct(_ text: String) -> Bool {
+    static func asksToAct(_ text: String) -> Bool {
         let t = text.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
         // HIGH-RECALL gate: offer tools for almost everything and let the model decide.
         // Missing a needed tool ("what's on my desktop" → list_files, "am I free?" →
@@ -53,7 +52,7 @@ extension AppDelegate {
     /// the (token-heavy) candidate list so it's only sent when pointing is wanted —
     /// not on a plain "explain this screen" turn. ("click"/"press"/"tap" now route
     /// to the CLICK path — checked before this gate.)
-    func promptAsksToPoint(_ text: String) -> Bool {
+    static func asksToPoint(_ text: String) -> Bool {
         let t = text.lowercased()
         return ["where", "point at", "point to", "show me", "find the", "locate",
                 "highlight", "which"].contains { t.contains($0) }
@@ -61,8 +60,8 @@ extension AppDelegate {
 
     /// Does this prompt ask Handle to actually PRESS something on screen? Routes to
     /// the click path: same select-by-index as pointing, then highlight → confirm
-    /// card → AXPress. Checked BEFORE promptAsksToPoint.
-    func promptAsksToClick(_ text: String) -> Bool {
+    /// card → AXPress. Checked before `asksToPoint`.
+    static func asksToClick(_ text: String) -> Bool {
         let t = text.lowercased()
         return ["click", "press the", "press on", "tap ", "tap the", "push the button",
                 "hit the button"].contains { t.contains($0) }

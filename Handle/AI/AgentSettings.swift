@@ -43,3 +43,20 @@ nonisolated struct RepeatGuard {
         return count
     }
 }
+
+extension RepeatGuard {
+    /// The signature of one tool call: its name and its arguments, normalised. A value that
+    /// reads as a date collapses to its minute, and everything else is lowercased and
+    /// trimmed, so the same call written slightly differently still counts as a repeat.
+    @MainActor
+    static func signature(name: String, args: [String: Any]) -> String {
+        let parts = args.keys.sorted().map { key -> String in
+            let raw = String(describing: args[key] ?? "")
+            if let date = CalendarTools.parseDate(raw) {
+                return "\(key)=@\(Int(date.timeIntervalSince1970 / 60))"
+            }
+            return "\(key)=\(raw.lowercased().trimmingCharacters(in: .whitespacesAndNewlines))"
+        }
+        return name + "|" + parts.joined(separator: "&")
+    }
+}

@@ -21,7 +21,7 @@ extension AppDelegate {
             fields still matches.
             \(list)
             """, tool: Self.selectSpec(name: "select_automation", what: "automation"), label: "recipe select")
-            let idx = args.flatMap { Self.intArg($0["index"]) } ?? firstInt(in: text)
+            let idx = args.flatMap { ToolCallParser.intArg($0["index"]) } ?? firstInt(in: text)
             agentLog.info("recipe: select over \(candidates.count) [\(candidates.map(\.id).joined(separator: ", "), privacy: .public)] → \(idx.map(String.init) ?? "none", privacy: .public)")
             guard let idx, idx >= 0, idx < candidates.count else { return nil }
             return candidates[idx]
@@ -55,7 +55,7 @@ extension AppDelegate {
             Call fill_parameters with the values for the "\(recipe.title)" automation, taken from the user's words. Use each value DIRECTLY — a number as a number, text as a string.
             """, tool: AIToolSpec(name: "fill_parameters", description: "The parameter values for the \(recipe.title) automation.", inputSchema: Self.schema(for: recipe.params)), label: "recipe fill")
             if let args { return args }
-            for json in jsonObjectCandidates(in: text) {
+            for json in ToolCallParser.jsonObjectCandidates(in: text) {
                 if let d = json.data(using: .utf8), let obj = try? JSONSerialization.jsonObject(with: d) as? [String: Any] { return obj }
             }
             return [:]
@@ -69,7 +69,7 @@ extension AppDelegate {
         text as a string; ONLY a "list of names" param takes a JSON array:
         \(spec)
         """)
-        for json in jsonObjectCandidates(in: reply) {
+        for json in ToolCallParser.jsonObjectCandidates(in: reply) {
             if let d = json.data(using: .utf8), let obj = try? JSONSerialization.jsonObject(with: d) as? [String: Any] {
                 return obj
             }

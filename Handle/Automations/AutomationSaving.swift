@@ -29,9 +29,9 @@ extension AppDelegate {
     /// A parsed schedule object (from a tool call or scraped JSON) → the automation schedule. Pure.
     static func scheduleFrom(_ o: [String: Any]) -> (schedule: AutomationSchedule, task: String)? {
         guard let task = o["task"] as? String, !task.isEmpty else { return nil }
-        let days = (o["days"] as? [Any])?.compactMap { Self.intArg($0) }
-        let sched = AutomationSchedule(hour: max(0, min(23, Self.intArg(o["hour"]) ?? 8)),
-                                       minute: max(0, min(59, Self.intArg(o["minute"]) ?? 0)),
+        let days = (o["days"] as? [Any])?.compactMap { ToolCallParser.intArg($0) }
+        let sched = AutomationSchedule(hour: max(0, min(23, ToolCallParser.intArg(o["hour"]) ?? 8)),
+                                       minute: max(0, min(59, ToolCallParser.intArg(o["minute"]) ?? 0)),
                                        days: (days?.isEmpty ?? true) ? nil : days)
         return (sched, task)
     }
@@ -53,7 +53,7 @@ extension AppDelegate {
             guard let window = str("window") else { return nil }
             return (AutomationTrigger(kind: kind, window: window), task)
         case "calendarSoon":
-            let lead = Self.intArg(o["minutesBefore"]).map { max(1, min(120, $0)) } ?? 10
+            let lead = ToolCallParser.intArg(o["minutesBefore"]).map { max(1, min(120, $0)) } ?? 10
             return (AutomationTrigger(kind: kind, minutesBefore: lead), task)
         case "screenLocks":
             let state = str("state").flatMap { ["lock", "unlock"].contains($0) ? $0 : nil }
@@ -88,7 +88,7 @@ extension AppDelegate {
         (days: 1=Sunday … 7=Saturday; null = every day. "8am"→8, "6pm"→18, "morning"→8, "evening"→18.)
         If it is NOT a recurring/scheduled request, reply with ONLY: none
         """)
-        for json in jsonObjectCandidates(in: reply) {
+        for json in ToolCallParser.jsonObjectCandidates(in: reply) {
             guard let d = json.data(using: .utf8), let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
                   let parsed = Self.scheduleFrom(o) else { continue }
             return parsed
@@ -195,7 +195,7 @@ extension AppDelegate {
         - event: the screen locks or unlocks → {"kind": "screenLocks", "state": <"lock" or "unlock">, "task": "<the do-Y action>"}
         If it is NOT a when-X-do-Y request, reply with ONLY: none
         """)
-        for json in jsonObjectCandidates(in: reply) {
+        for json in ToolCallParser.jsonObjectCandidates(in: reply) {
             guard let d = json.data(using: .utf8), let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
                   let parsed = Self.triggerFrom(o) else { continue }
             return parsed
