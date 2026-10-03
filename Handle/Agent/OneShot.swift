@@ -1,11 +1,11 @@
 import AppKit
 import OSLog
 
-// One-shot questions to the model that must come back as structured data.
-
-extension AppDelegate {
+/// One-off questions to the model outside the agent loop: a plain answer, or an answer
+/// that must come back as structured data.
+enum OneShot {
     /// One text-only model turn → the reply string.
-    func askModel(_ prompt: String) async -> String {
+    static func ask(_ prompt: String) async -> String {
         var out = ""
         // Select/fill one-shots: low effort — they're index picks and JSON fills,
         // not reasoning tasks.
@@ -23,7 +23,7 @@ extension AppDelegate {
     /// the parsing. Returns the call's arguments — nil when the model made no
     /// call (its way of saying "none fits") — plus any prose it wrote instead,
     /// for the callers' scrapers. Low effort: picks and fills, not reasoning.
-    func askForStructured(_ prompt: String, tool: AIToolSpec, label: String) async -> (args: [String: Any]?, text: String) {
+    static func askStructured(_ prompt: String, tool: AIToolSpec, label: String) async -> (args: [String: Any]?, text: String) {
         var text = ""
         var args: [String: Any]? = nil
         do {
@@ -35,7 +35,7 @@ extension AppDelegate {
                 }
             }
         } catch {
-            agentLog.error("askForStructured(\(tool.name, privacy: .public)): \(error.localizedDescription, privacy: .public)")
+            agentLog.error("OneShot.askStructured(\(tool.name, privacy: .public)): \(error.localizedDescription, privacy: .public)")
         }
         return (args, text)
     }

@@ -55,8 +55,8 @@ final class AgentLoopTests: AppTestCase {
         }
         XCTAssertEqual(TurnOutput(text: "", calls: [AgentToolCall(id: "a", name: "x", args: [:]), AgentToolCall(id: "b", name: "y", args: [:])]).call?.name, "x", "turn output: call = calls.first")
         XCTAssertTrue(TurnOutput(text: "", call: nil).calls.isEmpty, "turn output: call = calls.first")
-        XCTAssertTrue(app.actionToolInstruction(native: true).contains("several in one step"), "toolspec native: several calls, several steps")
-        XCTAssertTrue(app.actionToolInstruction(native: true).contains("say what is done and what is not"), "toolspec native: several calls, several steps")
+        XCTAssertTrue(AgentPrompting.toolGuide(native: true).contains("several in one step"), "toolspec native: several calls, several steps")
+        XCTAssertTrue(AgentPrompting.toolGuide(native: true).contains("say what is done and what is not"), "toolspec native: several calls, several steps")
     }
 
     func testPolicies() {
@@ -177,8 +177,8 @@ final class AgentLoopTests: AppTestCase {
         XCTAssertTrue(Intent.asksToAct("play some music"), "asksToAct applescript verb")
         XCTAssertTrue(Intent.asksToAct("lock my screen"), "asksToAct imperative")
         XCTAssertFalse(Intent.asksToAct("thanks"), "asksToAct filler→false")
-        XCTAssertTrue(app.toolResultText("recapture_screen", "ok", isError: false).contains("[Tool result for recapture_screen]"), "toolResultText format")
-        XCTAssertTrue(app.toolResultText("x", "bad", isError: true).contains("(error)"), "toolResultText error tag")
+        XCTAssertTrue(AgentPrompting.toolResultText("recapture_screen", "ok", isError: false).contains("[Tool result for recapture_screen]"), "toolResultText format")
+        XCTAssertTrue(AgentPrompting.toolResultText("x", "bad", isError: true).contains("(error)"), "toolResultText error tag")
         XCTAssertEqual(ConfirmationText.title("create_calendar_event"), "Create calendar event?", "confirmTitle friendly")
         XCTAssertEqual(ConfirmationText.rows(args: ["title": "X", "start_iso": "Y"]).count, 2, "confirmRows count")
         XCTAssertEqual(ConfirmationText.rows(args: ["title": "X", "notes": ""]).count, 1, "confirmRows drops empty")
@@ -241,7 +241,7 @@ final class AgentLoopTests: AppTestCase {
         XCTAssertEqual(projected[0].text, "first", "projection: prefix on last user only")
         XCTAssertTrue(AgentPrompting.messages(from: [Message(role: .assistant, text: "x", isStreaming: false)], prefix: "", image: nil).isEmpty, "projection: empty without a user turn")
         do {
-            let t = app.pointAtToolInstruction(elements: [AXElement(role: "AXButton", label: "Back", frame: .zero, value: nil)], native: true)
+            let t = AgentPrompting.pointingGuide(elements: [AXElement(role: "AXButton", label: "Back", frame: .zero, value: nil)], native: true)
             XCTAssertFalse(t.contains("{\"name\""), "point instr native: no JSON, mentions -1")
             XCTAssertTrue(t.contains("-1"), "point instr native: no JSON, mentions -1")
         }

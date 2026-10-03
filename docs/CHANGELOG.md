@@ -7,6 +7,8 @@
 - Unit tests moved out of the app into their own test target, and run on every push.
 - Removed an unused connector-routing path and its evaluation data.
 - The agent loop is a small class with one method per kind of tool, where it used to be a single 400-line function.
+- Tests use standard XCTest assertions, one expectation per line.
+- Parsing, intent checks, prompt text and one-shot questions moved off the app delegate into small types of their own.
 
 ## 1.0.1 (2 October 2026)
 

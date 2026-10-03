@@ -121,7 +121,7 @@ extension AppDelegate {
         let assistant = conversation.visibleMessages.first { $0.role == .assistant && !$0.text.isEmpty }?.text
         guard let user, let assistant else { return }
         conversation.generatedTitle = ""   // claim BEFORE the async call — no double generation
-        let reply = await askModel("""
+        let reply = await OneShot.ask("""
         Give this chat a title of 2 to 4 words. Reply with ONLY the title — no quotes, no punctuation.
         Example — a chat about scheduling a dentist visit → Dentist appointment
         Example — a chat asking to lower the volume → Volume change

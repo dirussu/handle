@@ -12,7 +12,7 @@ extension AppDelegate {
         guard !candidates.isEmpty else { return nil }
         let list = candidates.enumerated().map { "[\($0)] \($1.title) — \($1.description)" }.joined(separator: "\n")
         if AIConfig.nativeTools {   // the pick is a tool call; the schema parses it
-            let (args, text) = await askForStructured("""
+            let (args, text) = await OneShot.askStructured("""
             The user wants: "\(goal)"
 
             Which automation best matches? Call select_automation with the index of the best match, or -1 if NONE fit.
@@ -20,13 +20,13 @@ extension AppDelegate {
             specific values (names, paths, amounts) get filled in later, so an automation with input \
             fields still matches.
             \(list)
-            """, tool: Self.selectSpec(name: "select_automation", what: "automation"), label: "recipe select")
+            """, tool: OneShot.selectSpec(name: "select_automation", what: "automation"), label: "recipe select")
             let idx = args.flatMap { ToolCallParser.intArg($0["index"]) } ?? firstInt(in: text)
             agentLog.info("recipe: select over \(candidates.count) [\(candidates.map(\.id).joined(separator: ", "), privacy: .public)] → \(idx.map(String.init) ?? "none", privacy: .public)")
             guard let idx, idx >= 0, idx < candidates.count else { return nil }
             return candidates[idx]
         }
-        let reply = await askModel("""
+        let reply = await OneShot.ask("""
         The user wants: "\(goal)"
 
         Which automation best matches? Reply with ONLY the number of the best match, or -1 if NONE fit.
@@ -49,11 +49,11 @@ extension AppDelegate {
     func fillParams(recipe: Recipe, goal: String) async -> [String: Any] {
         guard !recipe.params.isEmpty else { return [:] }
         if AIConfig.nativeTools {   // the recipe's params ARE the tool schema
-            let (args, text) = await askForStructured("""
+            let (args, text) = await OneShot.askStructured("""
             The user wants: "\(goal)"
 
             Call fill_parameters with the values for the "\(recipe.title)" automation, taken from the user's words. Use each value DIRECTLY — a number as a number, text as a string.
-            """, tool: AIToolSpec(name: "fill_parameters", description: "The parameter values for the \(recipe.title) automation.", inputSchema: Self.schema(for: recipe.params)), label: "recipe fill")
+            """, tool: AIToolSpec(name: "fill_parameters", description: "The parameter values for the \(recipe.title) automation.", inputSchema: OneShot.schema(for: recipe.params)), label: "recipe fill")
             if let args { return args }
             for json in ToolCallParser.jsonObjectCandidates(in: text) {
                 if let d = json.data(using: .utf8), let obj = try? JSONSerialization.jsonObject(with: d) as? [String: Any] { return obj }
@@ -61,7 +61,7 @@ extension AppDelegate {
             return [:]
         }
         let spec = recipe.params.map { "- \($0.name) (\($0.type.describe)): \($0.prompt)" }.joined(separator: "\n")
-        let reply = await askModel("""
+        let reply = await OneShot.ask("""
         The user wants: "\(goal)"
 
         Fill the parameters for the "\(recipe.title)" automation. Reply with ONLY a JSON object

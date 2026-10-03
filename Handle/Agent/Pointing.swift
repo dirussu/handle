@@ -4,38 +4,6 @@ import OSLog
 // Pointing at and clicking on-screen elements chosen by index from the accessibility tree.
 
 extension AppDelegate {
-    /// The point_at tool spec. We give the model a NUMBERED LIST of the real
-    /// on-screen elements (from AX, each with an exact frame) and have it pick one
-    /// by index — a small local model is good at naming the right element but bad at
-    /// estimating its coordinates, so AX supplies the geometry. Empty list (no AX,
-    /// e.g. custom-drawn apps) → no pointing instruction at all.
-    func pointAtToolInstruction(elements: [AXElement], native: Bool = false) -> String {
-        guard !elements.isEmpty else { return "" }
-        let list = elements.enumerated().map { i, e in
-            let role = e.role.hasPrefix("AX") ? String(e.role.dropFirst(2)) : e.role
-            return "[\(i)] \(role) \"\(e.label)\""
-        }.joined(separator: "\n")
-        if native {   // cloud: point_at is a real tool; the list is the turn's data
-            return """
-            # On-screen elements (each has an index)
-            \(list)
-
-            The user is asking you to point at something on screen. Call the point_at tool with the index of the element that matches their request — or index -1 if NONE of the listed elements match (never force a wrong match).
-            """
-        }
-        return """
-        # On-screen elements (each has an index)
-        \(list)
-
-        The user is asking you to point at something on screen. Reply with ONLY this JSON — no other text:
-        {"name": "point_at", "arguments": {"index": <index>}}
-
-        Use the index of the element that matches their request. Example — asked "where is the search field?" with `[3] TextField "Search"` in the list → {"name": "point_at", "arguments": {"index": 3}}.
-
-        If NONE of the listed elements match what they asked for, use index -1 — do NOT force a wrong match:
-        {"name": "point_at", "arguments": {"index": -1}}
-        """
-    }
 
     /// Parse the reply for a `<tool_call>{…}</tool_call>` block; if it's a point_at,
     /// run it: capture-pixel point → screen, AX hit-test there for the exact element

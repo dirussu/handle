@@ -5,9 +5,9 @@ import AppKit
 @MainActor
 final class ToolTests: XCTestCase {
     func testStructuredOneShotsAsTools() {
-        XCTAssertEqual((AppDelegate.selectSpec(name: "select_automation", what: "automation").inputSchema["required"] as? [String]), ["index"], "oneshot: select spec requires index")
+        XCTAssertEqual((OneShot.selectSpec(name: "select_automation", what: "automation").inputSchema["required"] as? [String]), ["index"], "oneshot: select spec requires index")
         do {
-            let sch = AppDelegate.schema(for: [RecipeParam(name: "level", type: .int, prompt: "Volume"), RecipeParam(name: "apps", type: .stringList, prompt: "Apps"), RecipeParam(name: "mode", type: .oneOf(["on", "off"]), prompt: "Mode", default: "on")])
+            let sch = OneShot.schema(for: [RecipeParam(name: "level", type: .int, prompt: "Volume"), RecipeParam(name: "apps", type: .stringList, prompt: "Apps"), RecipeParam(name: "mode", type: .oneOf(["on", "off"]), prompt: "Mode", default: "on")])
             let props = sch["properties"] as? [String: Any]
             XCTAssertEqual((props?["level"] as? [String: Any])?["type"] as? String, "integer", "oneshot: recipe params → schema types")
             XCTAssertEqual(((props?["apps"] as? [String: Any])?["items"] as? [String: String])?["type"], "string", "oneshot: recipe params → schema types")

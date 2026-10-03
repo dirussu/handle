@@ -21,7 +21,7 @@ final class PointingTests: AppTestCase {
         XCTAssertFalse(Intent.asksToPoint("explain what's on screen"), "asksToPoint explain→false")
         XCTAssertFalse(Intent.asksToPoint("write a haiku about cats"), "asksToPoint haiku→false")
         // candidate list: prompt indices align with element order + labels present
-        let instr = app.pointAtToolInstruction(elements: [
+        let instr = AgentPrompting.pointingGuide(elements: [
             AXElement(role: "AXButton", label: "Back", frame: f, value: nil),
             AXElement(role: "AXTextField", label: "Search", frame: f, value: nil),
         ])
@@ -30,7 +30,7 @@ final class PointingTests: AppTestCase {
         XCTAssertTrue(instr.contains("index -1"), "instr has decline path (-1)")
         // -1 parses; dispatch guards idx<0
         XCTAssertEqual(ToolCallParser.intArg(-1 as NSNumber), -1, "dispatch declines on -1")
-        XCTAssertTrue(app.pointAtToolInstruction(elements: []).isEmpty, "instr empty→\"\"")
+        XCTAssertTrue(AgentPrompting.pointingGuide(elements: []).isEmpty, "instr empty→\"\"")
     }
 
     func testWebText() {

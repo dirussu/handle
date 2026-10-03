@@ -46,7 +46,7 @@ extension AppDelegate {
         if click {
             // __clicktest__: run the click pipeline card-less (DEBUG auto-approve) so
             // select → press is verifiable headlessly.
-            let finalText = await streamOneTurn(in: convo, instr: pointAtToolInstruction(elements: axElements), display: false)
+            let finalText = await streamOneTurn(in: convo, instr: AgentPrompting.pointingGuide(elements: axElements), display: false)
             if !(await dispatchClickIfPresent(finalText, conversation: convo, autoApprove: true)) {
                 agentLog.info("click: NOT HANDLED — nothing selected")
             }

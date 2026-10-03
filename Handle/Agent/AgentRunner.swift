@@ -111,7 +111,7 @@ final class AgentRunner {
         let recipes = readOnly ? "" : AppDelegate.recipeCandidatesLine(for: goal)
         // The system prompt stays identical across steps and turns so the provider can cache
         // it. Anything that changes per turn, like the clock, goes in this prefix instead.
-        turnPrefix = [usesNativeTools ? AppDelegate.currentTimeLine() : "", readOnlyNote, recipes]
+        turnPrefix = [usesNativeTools ? AgentPrompting.clockLine() : "", readOnlyNote, recipes]
             .filter { !$0.isEmpty }.joined(separator: "\n\n")
     }
 
@@ -119,10 +119,10 @@ final class AgentRunner {
     private func nextStep() async -> TurnOutput {
         let reply: TurnOutput
         if usesNativeTools {
-            reply = await app.streamTurn(in: conversation, rules: app.actionToolInstruction(native: true), instr: turnPrefix, display: false,
+            reply = await app.streamTurn(in: conversation, rules: AgentPrompting.toolGuide(native: true), instr: turnPrefix, display: false,
                                          tools: toolset, extraSpecs: webSpecs, loopHistory: history, consumeSlots: false, effort: policy.effort)
         } else {
-            let instructions = [turnPrefix, app.actionToolInstruction(), pendingResult].filter { !$0.isEmpty }.joined(separator: "\n\n")
+            let instructions = [turnPrefix, AgentPrompting.toolGuide(), pendingResult].filter { !$0.isEmpty }.joined(separator: "\n\n")
             pendingResult = ""
             reply = await app.streamTurn(in: conversation, instr: instructions, display: false, tools: toolset, effort: policy.effort)
         }
@@ -147,7 +147,7 @@ final class AgentRunner {
     private func finalAnswer(note: String) async -> AgentRun {
         let reply: TurnOutput
         if usesNativeTools {
-            reply = await app.streamTurn(in: conversation, rules: app.actionToolInstruction(native: true), instr: turnPrefix,
+            reply = await app.streamTurn(in: conversation, rules: AgentPrompting.toolGuide(native: true), instr: turnPrefix,
                                          loopHistory: history + [AIMessage.user(note)], effort: policy.effort)
         } else {
             let instructions = [turnPrefix, pendingResult, note].filter { !$0.isEmpty }.joined(separator: "\n\n")
@@ -204,7 +204,7 @@ final class AgentRunner {
             if let note { parts.append(.text(note)) }
             history.append(AIMessage(role: .user, parts: parts))
         } else {
-            pendingResult = results.map { app.toolResultText($0.call.name, $0.content, isError: $0.isError) }.joined(separator: "\n\n")
+            pendingResult = results.map { AgentPrompting.toolResultText($0.call.name, $0.content, isError: $0.isError) }.joined(separator: "\n\n")
             if let note { pendingResult += "\n\n" + note }
         }
     }

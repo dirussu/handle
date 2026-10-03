@@ -64,7 +64,7 @@ extension AppDelegate {
         // highlight → confirm card → AXPress → audit. Checked before pointing so
         // "click the send button" presses rather than just highlights.
         if image != nil, !isInitial, Intent.asksToClick(userText) {
-            let out = await streamTurn(in: conversation, instr: pointAtToolInstruction(elements: conversation.axElements, native: AIConfig.nativeTools),
+            let out = await streamTurn(in: conversation, instr: AgentPrompting.pointingGuide(elements: conversation.axElements, native: AIConfig.nativeTools),
                                        display: false, extraSpecs: [AgentPrompting.pointAtSpec])
             if !(await dispatchClick(out.call, conversation: conversation)) {
                 conversation.commitAssistantMessage("I don't see that on the screen.")
@@ -76,7 +76,7 @@ extension AppDelegate {
         // (display:false) so the raw point_at JSON never shows; the highlight IS the
         // answer, so we add a message only when nothing was highlighted.
         if image != nil, !isInitial, Intent.asksToPoint(userText) {
-            let out = await streamTurn(in: conversation, instr: pointAtToolInstruction(elements: conversation.axElements, native: AIConfig.nativeTools),
+            let out = await streamTurn(in: conversation, instr: AgentPrompting.pointingGuide(elements: conversation.axElements, native: AIConfig.nativeTools),
                                        display: false, extraSpecs: [AgentPrompting.pointAtSpec])
             if !dispatchPointAt(out.call, conversation: conversation) {
                 conversation.commitAssistantMessage("I don't see that on the screen.")

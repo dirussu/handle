@@ -73,14 +73,14 @@ extension AppDelegate {
     /// (NL→structured, its strength). Returns nil if it's not actually a schedule.
     func parseSchedule(_ goal: String) async -> (schedule: AutomationSchedule, task: String)? {
         if AIConfig.nativeTools {
-            let (args, _) = await askForStructured("""
+            let (args, _) = await OneShot.askStructured("""
             The user said: "\(goal)"
 
             If this asks to SCHEDULE a recurring task, call schedule_task. If it is NOT a recurring/scheduled request, call nothing and reply: none
             """, tool: Self.scheduleSpec, label: "schedule parse")
             return args.flatMap(Self.scheduleFrom)
         }
-        let reply = await askModel("""
+        let reply = await OneShot.ask("""
         The user said: "\(goal)"
 
         If this asks to SCHEDULE a recurring task, reply with ONLY this JSON:
@@ -172,14 +172,14 @@ extension AppDelegate {
     /// split-the-request pattern as parseSchedule). Nil = not an event-trigger request.
     func parseEventTrigger(_ goal: String) async -> (trigger: AutomationTrigger, task: String)? {
         if AIConfig.nativeTools {
-            let (args, _) = await askForStructured("""
+            let (args, _) = await OneShot.askStructured("""
             The user said: "\(goal)"
 
             If this asks to run a task WHENEVER AN EVENT happens (phrased like "when X happens, do Y"), call set_trigger. If it is NOT a when-X-do-Y request, call nothing and reply: none
             """, tool: Self.triggerSpec, label: "trigger parse")
             return args.flatMap(Self.triggerFrom)
         }
-        let reply = await askModel("""
+        let reply = await OneShot.ask("""
         The user said: "\(goal)"
 
         If this asks to run a task WHENEVER AN EVENT happens (phrased like "when X happens, do Y"),
