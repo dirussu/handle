@@ -78,7 +78,7 @@ extension AppDelegate {
     }
 
     /// First integer (incl. negative) in a string.
-    func firstInt(in s: String) -> Int? {
+    private func firstInt(in s: String) -> Int? {
         guard let r = s.range(of: "-?\\d+", options: .regularExpression) else { return nil }
         return Int(s[r])
     }

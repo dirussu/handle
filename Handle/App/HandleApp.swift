@@ -26,8 +26,8 @@ struct HandleApp: App {
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
 
-    var hotkeyMonitor: HotkeyMonitor?
-    var editKeyMonitor: Any?
+    private var hotkeyMonitor: HotkeyMonitor?
+    private var editKeyMonitor: Any?
     var isPresentingOverlay = false
     /// The most recently started conversation. Stays alive after the user
     /// dismisses the notch panel; replaced when a new capture starts.
@@ -128,7 +128,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// 2. A local key monitor that routes the equivalents straight to the
     ///    focused responder — menu routing can be bypassed while a
     ///    nonactivating panel has key without the app being active.
-    func installEditMenu() {
+    private func installEditMenu() {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
             guard let main = NSApp.mainMenu,
                   !main.items.contains(where: { $0.submenu?.title == "Edit" }) else { return }
@@ -161,7 +161,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    func setupHotkey() {
+    private func setupHotkey() {
         // ⌥ is the Handle key ("simpler than a chord"):
         // double-tap → full-screen capture; HOLD ⌥ alone → talk, release to run.
         let monitor = HotkeyMonitor(

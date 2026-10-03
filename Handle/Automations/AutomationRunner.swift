@@ -94,7 +94,7 @@ extension AppDelegate {
         agentLog.info("scheduler: started (\(AutomationStore.shared.automations.count) automation(s))")
     }
 
-    func tickScheduler() async {
+    private func tickScheduler() async {
         let now = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute, .weekday], from: Date())
         guard let y = now.year, let mo = now.month, let d = now.day, let h = now.hour, let mi = now.minute else { return }
         let key = String(format: "%04d-%02d-%02d-%02d-%02d", y, mo, d, h, mi)

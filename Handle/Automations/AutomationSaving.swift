@@ -5,7 +5,7 @@ import OSLog
 // Turning "every day at…" and "when…" requests into saved automations.
 
 extension AppDelegate {
-    static let scheduleSpec = AIToolSpec(
+    private static let scheduleSpec = AIToolSpec(
         name: "schedule_task",
         description: "Save a RECURRING scheduled task. Only for requests like \"every day at 8am, …\" / \"each weekday morning, …\". days: 1=Sunday … 7=Saturday; omit for every day. \"8am\"→8, \"6pm\"→18, \"morning\"→8, \"evening\"→18.",
         inputSchema: ["type": "object",
@@ -15,7 +15,7 @@ extension AppDelegate {
                                      "task": ["type": "string", "description": "The action, with the scheduling words removed"]],
                       "required": ["hour", "minute", "task"]])
 
-    static let triggerSpec = AIToolSpec(
+    private static let triggerSpec = AIToolSpec(
         name: "set_trigger",
         description: "Save a task that runs WHENEVER AN EVENT happens (\"when X happens, do Y\"). The event is the when-part; task is the do-Y part. fileAppears: folder (screenshots land on ~/Desktop, downloads in ~/Downloads) + optional ext. appLaunches: the app's name. wifiConnects: optional ssid. windowMatches: title text (\"Zoom Meeting\"). calendarSoon: minutesBefore (\"10 minutes before\"→10). screenLocks: state lock|unlock.",
         inputSchema: ["type": "object",
@@ -132,7 +132,7 @@ extension AppDelegate {
     /// ROUTINE SAVE — the standing-consent card for an agentic scheduled task,
     /// then persist. The card is explicit that each run works UNSUPERVISED with
     /// read-only tools + the user's connectors.
-    func saveRoutine(task: String, schedule: AutomationSchedule, in conversation: Conversation) async -> Bool {
+    private func saveRoutine(task: String, schedule: AutomationSchedule, in conversation: Conversation) async -> Bool {
         let approved = await awaitConfirmation(in: conversation, title: "Save routine?",
             rows: [("When", schedule.describe),
                    ("Task", task),

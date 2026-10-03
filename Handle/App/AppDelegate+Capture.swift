@@ -170,7 +170,7 @@ extension AppDelegate {
     /// at text speed, while screen-referential ones ("what's this error?",
     /// "summarize this") trigger a look. Imperfect by design — the user can
     /// always force a look with ⌥⌥, or add "this" to a phrasing.
-    func promptReferencesScreen(_ text: String) -> Bool {
+    private func promptReferencesScreen(_ text: String) -> Bool {
         let lower = text.lowercased()
         let tokens = lower.split { !$0.isLetter && $0 != "'" }.map(String.init)
         guard !tokens.isEmpty else { return false }
@@ -271,7 +271,7 @@ extension AppDelegate {
     /// tokens against each window's app name (weighted) and title words,
     /// ignoring generic tokens ("code", "app") that cause false hits. Returns
     /// the best match, or nil.
-    func windowReferenced(in windows: [WindowInfo], by text: String) -> WindowInfo? {
+    private func windowReferenced(in windows: [WindowInfo], by text: String) -> WindowInfo? {
         let promptTokens = Set(
             text.lowercased().split { !$0.isLetter }.map(String.init).filter { $0.count >= 3 }
         )
@@ -302,14 +302,14 @@ extension AppDelegate {
 
     /// Cheap check for "tell me about my machine" prompts that want the window
     /// list but no screenshot ("what apps do I have open?", "what's running?").
-    func referencesOpenWindows(_ text: String) -> Bool {
+    private func referencesOpenWindows(_ text: String) -> Bool {
         let tokens = Set(text.lowercased().split { !$0.isLetter }.map(String.init))
         return !tokens.isDisjoint(with: ["apps", "running", "tabs", "spaces", "desktops", "windows"])
     }
 
     /// Render the window manifest as a short text preamble for the model. When
     /// `lookingAt` is set, it notes which window the attached screenshot shows.
-    func contextPreamble(windows: [WindowInfo], lookingAt: WindowInfo?) -> String {
+    private func contextPreamble(windows: [WindowInfo], lookingAt: WindowInfo?) -> String {
         guard !windows.isEmpty else { return "" }
         var lines = ["[Windows currently open on this Mac:"]
         for w in windows {

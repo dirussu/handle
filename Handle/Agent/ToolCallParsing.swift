@@ -22,7 +22,7 @@ extension AppDelegate {
     /// instead of JSON — `create_reminder(title="Call mom", priority="high")`.
     /// Anchored on KNOWN tool names (earliest occurrence wins) so free prose can't
     /// false-match; the paren scan is string-aware (quoted commas/parens are safe).
-    func parseFunctionCall(_ text: String) -> (name: String, args: [String: Any])? {
+    private func parseFunctionCall(_ text: String) -> (name: String, args: [String: Any])? {
         // Require the response to BE the call (start with a known name( after any
         // opening code fence) — so prose that merely mentions "open_url(...)" can't misfire.
         var t = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -50,7 +50,7 @@ extension AppDelegate {
 
     /// `key="value", key2=123, key3=true` → dict, respecting quoted commas and
     /// coercing bare numbers/bools. Quoted values stay strings (unescaped).
-    func parseKeyValueArgs(_ s: String) -> [String: Any] {
+    private func parseKeyValueArgs(_ s: String) -> [String: Any] {
         var parts: [String] = [], cur = ""
         var inString = false, escaped = false, quote: Character = "\""
         for c in s {

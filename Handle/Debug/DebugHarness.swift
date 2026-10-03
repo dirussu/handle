@@ -11,10 +11,10 @@ extension AppDelegate {
     // command file; each command runs one path (a full turn, a routine, a UI render) and
     // logs the outcome to the unified log (subsystem com.dimarussu.Handle, category Agent).
 
-    static let testCmdPath = "/tmp/handle_test_cmd"
+    private static let testCmdPath = "/tmp/handle_test_cmd"
 
     /// The repo's `tools/` folder (test doubles), from this source file's location.
-    static let repoToolsDir = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("tools").path
+    private static let repoToolsDir = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("tools").path
 
     func startTestHarness() {
         Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
@@ -464,7 +464,7 @@ extension AppDelegate {
     /// PLANNING PROBE (`__plan__ <goal>`): can a small local model decompose a multi-step
     /// automation into a sane ordered plan of tool calls? Text-only, NO execution —
     /// just logs the plan for eyeballing. Decides freeform-plan vs recipe-first.
-    func runPlanProbe(goal: String) async {
+    private func runPlanProbe(goal: String) async {
         let tools = ToolRegistry.promptSpec(for: ToolRegistry.all)
         let prompt = """
         You are Handle, an assistant that automates a Mac using ONLY these tools:
@@ -491,7 +491,7 @@ extension AppDelegate {
 
     /// RECIPE PROBE (`__recipe__ <goal>`): match → fill → resolve, logging each stage
     /// (no execution) to validate retrieve+fill on the real model.
-    func runRecipeProbe(goal: String) async {
+    private func runRecipeProbe(goal: String) async {
         agentLog.info("recipe: goal=\"\(goal, privacy: .public)\"")
         guard let recipe = await matchRecipe(goal: goal) else {
             agentLog.info("recipe: NO MATCH — would decline"); return
@@ -506,7 +506,7 @@ extension AppDelegate {
 
     /// PERMISSIONS TEST (`__permstest__`): log every TCC status non-interactively
     /// (Automation checked against Finder + System Events, no dialogs).
-    func runPermsTest() async {
+    private func runPermsTest() async {
         agentLog.info("perms: accessibility=\(PermissionsService.accessibility().label, privacy: .public)")
         agentLog.info("perms: screenRecording=\(PermissionsService.screenRecording().label, privacy: .public)")
         agentLog.info("perms: calendars=\(PermissionsService.calendars().label, privacy: .public)")
@@ -522,7 +522,7 @@ extension AppDelegate {
 
     /// APP-LAUNCH TRIGGER TEST (`__trigapptest__`): set volume to 35 whenever
     /// Calculator launches — validates NSWorkspace source → match → fire.
-    func runTrigAppTest() {
+    private func runTrigAppTest() {
         AutomationStore.shared.add(Automation(id: "trigapptest", name: "app-launch test", recipeId: "set-volume",
                                               paramsJSON: "{\"level\": 35}",
                                               trigger: AutomationTrigger(kind: "appLaunches", app: "Calculator")))
@@ -533,7 +533,7 @@ extension AppDelegate {
     /// TRIGGER TEST (`__trigtest__`): watch /tmp/handle_trigger_test for new .png files
     /// and set volume to 25 when one appears — validates the reactive path end to end
     /// (watcher → engine match → runAutomation, no card, audited).
-    func runTrigTest() {
+    private func runTrigTest() {
         let dir = "/tmp/handle_trigger_test"
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         AutomationStore.shared.add(Automation(id: "trigtest", name: "trigger test", recipeId: "set-volume",
@@ -545,7 +545,7 @@ extension AppDelegate {
 
     /// SCHEDULER TEST (`__schedtest__`): save a "set volume to 12" automation firing ~70s
     /// out (no card) and let the live scheduler pick it up — validates the tick loop.
-    func runSchedTest() {
+    private func runSchedTest() {
         let c = Calendar.current.dateComponents([.hour, .minute], from: Date().addingTimeInterval(70))
         AutomationStore.shared.add(Automation(id: "schedtest", name: "sched test", recipeId: "set-volume",
                                               paramsJSON: "{\"level\": 12}",
@@ -556,7 +556,7 @@ extension AppDelegate {
     /// Run the full pointing pipeline against the frontmost app for `query`, no GUI
     /// needed — capture, enumerate AX, See turn with the pointing instruction; the
     /// dispatch logs the selected element + live frame (and draws the highlight).
-    func runPointingHarness(query: String, click: Bool = false) async {
+    private func runPointingHarness(query: String, click: Bool = false) async {
         let app = NSWorkspace.shared.frontmostApplication
         let bundleID = app?.bundleIdentifier
         let cursor = NSEvent.mouseLocation
@@ -589,7 +589,7 @@ extension AppDelegate {
     /// Render the Settings page and the onboarding connect step offscreen to
     /// /tmp/handle_settings.png and /tmp/handle_connect.png — visual verification
     /// of notch pages without driving the notch by hand.
-    func renderUIShots() {
+    private func renderUIShots() {
         // NSHostingView in an offscreen window + cacheDisplay: unlike ImageRenderer
         // this draws AppKit-backed SwiftUI (Form/List) and honours the dark appearance.
         func save(_ view: some View, width: CGFloat, height: CGFloat, to path: String) {
@@ -642,7 +642,7 @@ extension AppDelegate {
     /// DEBUG: drive the "working" comet for 8s WITHOUT a model turn, so its
     /// main-thread cost can be sampled in isolation — validates the Canvas rewrite
     /// of BorderComet without a model in the picture. Fire `__comet__`, then `sample $(pgrep -x Handle) 3` during the window.
-    func runCometProbe() async {
+    private func runCometProbe() async {
         agentLog.info("comet probe: ON for 8s (no model) — sample the process now")
         NotchController.shared.setWorking(true)
         try? await Task.sleep(for: .seconds(8))
@@ -653,7 +653,7 @@ extension AppDelegate {
     /// DEBUG: drive one metaball highlight (birth → morph → retract) with NO model,
     /// so the pointer animation's per-frame cost can be sampled — same TimelineView
     /// bug class as the comet; the metaball is the product centerpiece.
-    func runHighlightProbe() {
+    private func runHighlightProbe() {
         let screen = PointingOverlay.currentScreen()
         let r = CGRect(x: screen.frame.midX - 60, y: screen.frame.midY - 24, width: 120, height: 48)
         agentLog.info("highlight probe: driving a sample highlight — sample the process now")
@@ -662,7 +662,7 @@ extension AppDelegate {
 
     /// DEBUG: dump the frontmost app's RAW AX tree (no filter) to the log — to see
     /// what Electron/Chromium apps actually expose under AXManualAccessibility.
-    func runAXTreeDump() {
+    private func runAXTreeDump() {
         let front = NSWorkspace.shared.frontmostApplication
         let lines = AccessibilityProbe.rawTree(of: front?.bundleIdentifier)
         agentLog.info("AX raw tree — \(front?.localizedName ?? "?", privacy: .public) [\(front?.bundleIdentifier ?? "?", privacy: .public)] — \(lines.count) nodes:")

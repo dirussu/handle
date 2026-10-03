@@ -175,7 +175,7 @@ extension AppDelegate {
     }
 
     /// Show an open panel to pick a PDF, then stage it as the pending PDF on the conversation.
-    func attachPDF(to conversation: Conversation) {
+    private func attachPDF(to conversation: Conversation) {
         let panel = NSOpenPanel()
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
